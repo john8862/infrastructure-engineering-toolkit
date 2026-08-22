@@ -23,6 +23,10 @@ Each component should explain its expected environment, dependencies, usage, mai
 - Prefer simple, reproducible changes over opaque automation.
 - Treat logging, recovery, and maintenance as part of the implementation.
 
+## Licence
+
+Original toolkit content in this repository is provided under the [MIT License](LICENSE), with copyright © 2026 Peng Zhao. The repository owner has confirmed ownership and publication rights for the original material included here. Third-party material and dependencies retain their own licence and attribution terms; the MIT License does not relicense them.
+
 ## Getting started
 
 There is no runnable component in the initial scaffold. Once the first component is published, its directory will contain the authoritative setup and usage instructions.
