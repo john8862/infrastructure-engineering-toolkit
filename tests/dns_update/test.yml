@@ -1,0 +1,9 @@
+---
+- name: Exercise the disabled DNS role contract without network access
+  hosts: all
+  gather_facts: false
+  connection: local
+  vars:
+    dns_update_enabled: false
+  roles:
+    - role: dns_update
