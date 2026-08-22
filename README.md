@@ -49,6 +49,7 @@ live execution before DNS was reached. No live DNS deployment outcome is claimed
 - [Safe Quick Start](#safe-quick-start)
 - [Repository layout](#repository-layout)
 - [Validation and CI](#validation-and-ci)
+- [Branch governance](#branch-governance)
 - [Release, versioning, and changelog](#release-versioning-and-changelog)
 - [Operational safety, secrets, and certificates](#operational-safety-secrets-and-certificates)
 - [Roadmap](#roadmap)
@@ -370,7 +371,64 @@ deployment credentials.
 
 CI installs the exact versions from [`requirements-ci.txt`](requirements-ci.txt) and [`ansible/requirements.yml`](ansible/requirements.yml)
 into temporary runner paths. The `require-final-union.sh` guard confirms that all public component paths are present before
-the quality gates report a complete repository. The workflow intentionally does not use a dependency cache.
+the quality gates report a complete repository. The exact check contexts and the `develop`/`main` freshness difference
+are documented in [`docs/CI.md`](docs/CI.md). The workflow intentionally does not use a dependency cache.
+
+## Branch governance
+
+The repository uses a small promotion hierarchy that keeps day-to-day work open
+to contributors while giving the stable branch a stronger release gate:
+
+```text
+fork or topic branch  ->  develop  ->  main
+```
+
+### `develop`: active integration
+
+- Create ordinary `feature/`, `fix/`, `bugfix/`, `chore/`, `docs/`, `ci/`,
+  `test/`, or `refactor/` branches from the latest `develop`.
+- Open normal pull requests from a topic branch or fork against `develop`.
+- Require the four Quality Gates, resolved conversations, and pull-request
+  integration; force-push and branch deletion are blocked on `develop`.
+- Keep `develop` deliberately non-strict about branch freshness and
+  non-linear in its history. This reduces unnecessary rebase churn while the
+  integration branch changes quickly. Squash is still preferred for normal
+  topic merges so each change remains easy to audit.
+- External contributors do not need push access: a fork can submit a pull
+  request to `develop`, and the maintainer reviews and integrates it.
+
+The owner can merge a validated pull request without a second GitHub account.
+Human review is encouraged for external contributions, but approvals, Code
+Owner review, approval of the most recent push, merge queues, signed commits,
+and deployment approvals are not mandatory controls in this solo-maintainer
+repository.
+
+### `main`: stable and release promotion
+
+- `main` is the stable branch and the only branch watched by Release Please.
+- Changes normally arrive through a reviewed `develop` to `main` promotion
+  pull request. The owner still merges the validated pull request; no second
+  human approval is required.
+- The same four Quality Gates are required, but `main` additionally requires
+  the branch to be up to date before merge and keeps a linear history. Use
+  squash or rebase for a clean promotion history.
+- Pull requests and resolved conversations are required; force-push and branch
+  deletion are blocked. Direct pushes are not the normal workflow.
+
+The repository owner/admin retains a break-glass bypass for recovery only. It
+must not be used as a substitute for a pull request, green checks, or normal
+review. Never reset or force-push protected branches.
+
+Because a squash promotion can make the commit graphs of `develop` and `main`
+diverge, a later promotion may report that `develop` is behind. In that case,
+use GitHub's **Update branch** action to merge the current `main` into
+`develop`, rerun the Quality Gates, or open a small `main` to `develop` sync
+pull request. Preserve both branches and their audit trail; do not rewrite
+either protected branch.
+
+An urgent hotfix starts from `main` and is reviewed through a focused pull
+request. After it is merged, apply the equivalent fix to `develop` so the next
+promotion does not regress the stable branch.
 
 ## Release, versioning, and changelog
 
@@ -455,7 +513,7 @@ git pull --ff-only origin develop
 git switch -c feature/focused-scope-short-description
 ```
 
-Use `feature/`, `fix/`, `docs/`, `ci/`, `test/`, `refactor/`, or `chore/` and the form
+Use `feature/`, `fix/`, `bugfix/`, `docs/`, `ci/`, `test/`, `refactor/`, or `chore/` and the form
 `<prefix>/<focused-scope>-<short-description>`. Existing branches with a simple scope remain understandable and
 compatible. Open the pull request against `develop` by default. A reviewed `develop` to `main` pull request is for
 integration and release promotion; an emergency hotfix targeting `main` must state why the normal path cannot be used
