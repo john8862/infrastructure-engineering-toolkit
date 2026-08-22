@@ -1,0 +1,7 @@
+---
+- name: Validate and configure the example MariaDB topology
+  hosts: mariadb_replication
+  become: true
+  gather_facts: true
+  roles:
+    - role: mariadb_replication
