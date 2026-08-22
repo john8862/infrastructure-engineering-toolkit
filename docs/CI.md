@@ -23,8 +23,17 @@ this prevents a partial repository from being reported as a complete build.
   `ansible/requirements.yml`, with exact versions. `ansible-lint`, `yamllint`,
   and syntax checks cover every public role fixture, including MaxScale and
   Keepalived.
-- Markdown is scanned recursively with PyMarkdown, and `git diff --check`
-  rejects whitespace errors in the change range.
+- YAML is checked with the version-controlled `.yamllint` profile. Structural
+  rules remain strict; the line-length rule is disabled because long task
+  expressions, URLs, and workflow declarations are often clearer when kept
+  together. The workflow passes this profile explicitly rather than relying on
+  a runner default.
+- Markdown is scanned recursively with PyMarkdown using
+  `.pymarkdown.json`. MD013 is disabled for the same content-aware reason,
+  while all other default rules remain enabled and failing. The workflow
+  passes this configuration explicitly; it does not suppress scan failures or
+  exclude repository paths.
+- `git diff --check` rejects whitespace errors in the change range.
 
 The workflow intentionally does not enable dependency caching. This keeps the
 validation environment easy to audit and avoids reusing a stale or

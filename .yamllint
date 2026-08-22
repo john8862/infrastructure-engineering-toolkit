@@ -1,0 +1,8 @@
+---
+extends: relaxed
+
+# Repository content includes long, reviewable configuration expressions and
+# Markdown-style tables. Keep structural YAML checks enabled while treating
+# line length as an informational concern.
+rules:
+  line-length: disable
