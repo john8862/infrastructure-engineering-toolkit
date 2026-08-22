@@ -25,3 +25,33 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # release_created/tag_name/version are documented root-component outputs
+      # of the pinned Release Please action.  The tag is checked out so assets
+      # are built from the exact source that was released, not the triggering
+      # branch tip.  GITHUB_TOKEN does not trigger a second workflow here.
+      - name: Check out the published tag
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.release.outputs.tag_name }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Build independent release assets
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_ASSET_DIR: ${{ runner.temp }}/release-assets
+        run: |
+          python3 scripts/release/build-assets.py \
+            --version "$RELEASE_VERSION" \
+            --output-dir "$RELEASE_ASSET_DIR"
+
+      - name: Upload independent release assets
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_ASSET_DIR: ${{ runner.temp }}/release-assets
+        run: gh release upload "$RELEASE_TAG" "$RELEASE_ASSET_DIR"/* --clobber

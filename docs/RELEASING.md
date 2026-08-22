@@ -35,6 +35,48 @@ GitHub Release.
    come from the same merged commit history.
 4. Confirm the tag, GitHub Release, version file, manifest, and changelog agree.
 
+## Independent release assets
+
+Every published root release includes six separately installable archives:
+
+| Asset | Contents |
+| --- | --- |
+| `ansible-role-dns-update-v<version>.tar.gz` | The `dns_update` role only |
+| `ansible-role-keepalived-v<version>.tar.gz` | The `keepalived` role only |
+| `ansible-role-mariadb-v<version>.tar.gz` | The `mariadb` role only |
+| `ansible-role-mariadb-replication-v<version>.tar.gz` | The `mariadb_replication` role only |
+| `ansible-role-maxscale-v<version>.tar.gz` | The `maxscale` role only |
+| `freeipa-bootstrap-v<version>.tar.gz` | Public FreeIPA bootstrap scripts, docs, and safe example templates |
+
+`SHA256SUMS-v<version>.txt` covers those archives and the accompanying
+`release-manifest-v<version>.json`. The manifest records the release tag,
+asset kind, component, size, and SHA-256 digest. Role archives extract to one
+role root and carry the repository MIT `LICENSE`; the FreeIPA archive extracts
+to `freeipa-bootstrap/` and does not include CI, tests, internal policy files,
+or runtime secrets.
+
+The release job calls the official Release Please Action's documented root
+outputs (`release_created`, `tag_name`, and `version`). Only when
+`release_created` is true does it check out the new tag, run
+[`scripts/release/build-assets.py`](../scripts/release/build-assets.py), and
+upload the generated files with the runner's `gh release upload`. The upload
+uses the job's least-privilege `contents: write` permission. Since the upload
+uses `GITHUB_TOKEN`, it does not recursively trigger another workflow run.
+
+The local packaging smoke test is:
+
+```bash
+python3 tests/release/test_assets.py
+```
+
+It builds v0.1.0 twice in temporary directories and fails on a changed hash,
+an unexpected path or link, unsafe archive permissions, a forbidden boundary,
+known internal-policy or credential-marker content, or a checksum mismatch.
+These markers are a bounded contract check, not a claim to detect every
+possible secret. The builder accepts a strict SemVer value or a `v`-prefixed
+tag and fails closed for malformed versions or non-Git source trees. It never
+creates a tag or GitHub Release itself.
+
 No feature-branch workflow run can publish a release. Do not manually edit a
 generated release section while a Release PR is open; correct the source
 commit or update the Release PR instead.

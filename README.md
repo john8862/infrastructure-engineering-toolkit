@@ -363,6 +363,24 @@ Use commit subjects such as `feat(mariadb): ...`, `fix(maxscale): ...`, `docs(fr
 rules. The FreeIPA bootstrap also maintains its own component configuration baseline in its component guide; that does
 not replace the root release version.
 
+### Release assets
+
+Each published `v<version>` GitHub Release contains independent, versioned
+installation assets rather than one combined toolkit archive:
+
+| Asset family | Published files | Archive root | Intended use |
+| --- | --- | --- | --- |
+| Ansible roles | `ansible-role-dns-update-v<version>.tar.gz`, `ansible-role-keepalived-v<version>.tar.gz`, `ansible-role-mariadb-v<version>.tar.gz`, `ansible-role-mariadb-replication-v<version>.tar.gz`, and `ansible-role-maxscale-v<version>.tar.gz` | The role name, with its own `README.md` and `LICENSE` | Install or vendor one role without importing unrelated roles |
+| FreeIPA bootstrap | `freeipa-bootstrap-v<version>.tar.gz` | `freeipa-bootstrap/` | Run the public bootstrap scripts with their operational documentation and safe example templates |
+| Integrity metadata | `SHA256SUMS-v<version>.txt` and `release-manifest-v<version>.json` | N/A | Verify downloaded assets and inspect the machine-readable package inventory |
+
+The release workflow builds these assets from the exact published tag using
+the explicit allowlists in [`scripts/release/build-assets.py`](scripts/release/build-assets.py).
+It rejects untracked inputs, symlinks, unsafe archive paths, writable archive
+entries, and secret or internal repository material. The CI packaging contract
+builds the assets twice, checks byte-for-byte reproducibility, validates the
+archive boundaries, and verifies every checksum before any upload step can run.
+
 ## Operational safety, secrets, and certificates
 
 - Keep passwords, Kerberos credentials, TSIG secrets, private keys, certificates, access tokens, and environment-specific
