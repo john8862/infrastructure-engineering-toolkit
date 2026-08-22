@@ -1,0 +1,111 @@
+---
+- name: Initialize MariaDB replication role state
+  ansible.builtin.set_fact:
+    mariadb_replication_role_failed: false
+    mariadb_replication_failure_reasons: []
+    mariadb_replication_replica_validation_failed: false
+    mariadb_replication_replica_configuration_failed: false
+    mariadb_replication_validation_failure: ""
+    mariadb_replication_configuration_failure: ""
+    mariadb_replication_configuration_success: false
+  tags:
+    - always
+
+- name: Verify the controller runtime and Python dependencies
+  ansible.builtin.import_tasks: controller_preflight.yml
+  tags:
+    - always
+    - validate
+
+- name: Install optional MariaDB packages
+  ansible.builtin.import_tasks: install.yml
+  when:
+    - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+  tags:
+    - install
+
+- name: Validate topology and role inputs
+  ansible.builtin.import_tasks: validate_inputs.yml
+  when:
+    - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+  tags:
+    - always
+    - validate
+
+- name: Validate the initial primary
+  ansible.builtin.import_tasks: validate_primary.yml
+  when:
+    - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+    - mariadb_replication_node_role == 'primary'
+  tags:
+    - always
+    - validate
+
+- name: Configure the primary replication account
+  ansible.builtin.import_tasks: configure_primary.yml
+  when:
+    - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+    - mariadb_replication_node_role == 'primary'
+    - not (mariadb_replication_role_failed | bool)
+  tags:
+    - configure
+    - replication
+
+- name: Validate this replica
+  ansible.builtin.import_tasks: validate_replica.yml
+  when:
+    - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+    - mariadb_replication_node_role == 'replica'
+  tags:
+    - always
+    - validate
+
+- name: Validate server ID uniqueness across the topology
+  ansible.builtin.import_tasks: validate_server_ids.yml
+  when:
+    - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+  tags:
+    - always
+    - validate
+
+- name: Configure this replica
+  ansible.builtin.import_tasks: configure_replica.yml
+  when:
+    - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+    - mariadb_replication_node_role == 'replica'
+    - not (mariadb_replication_replica_validation_failed | bool)
+    - not (hostvars[mariadb_replication_initial_primary].mariadb_replication_role_failed | default(false) | bool)
+    - hostvars[mariadb_replication_initial_primary].mariadb_replication_primary_user_privileges_valid | default(false) | bool
+  tags:
+    - configure
+    - replication
+
+- name: Record a replica blocked by an unsafe primary
+  ansible.builtin.set_fact:
+    mariadb_replication_replica_configuration_failed: true
+    mariadb_replication_configuration_success: false
+    mariadb_replication_configuration_failure: >-
+      The initial primary failed a safety validation, so this replica was not
+      configured.
+  when:
+    - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+    - mariadb_replication_node_role == 'replica'
+    - not mariadb_replication_replica_validation_failed | bool
+    - hostvars[mariadb_replication_initial_primary].mariadb_replication_role_failed | default(false) | bool
+  tags:
+    - configure
+    - replication
+
+- name: Collect replication health data
+  ansible.builtin.import_tasks: healthcheck.yml
+  when:
+    - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+    - mariadb_replication_healthcheck_enabled | bool
+  tags:
+    - healthcheck
+
+- name: Print the consolidated replication summary
+  ansible.builtin.import_tasks: summary.yml
+  tags:
+    - always
+    - healthcheck

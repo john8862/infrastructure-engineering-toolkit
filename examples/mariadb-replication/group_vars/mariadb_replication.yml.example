@@ -1,0 +1,20 @@
+---
+# Copy this file into the caller's protected group_vars/Vault workflow and
+# provide vault_mariadb_replication_password there. This file contains no
+# credential or topology-specific secret.
+mariadb_replication_initial_primary: db-primary
+mariadb_replication_primary_host: db-primary.example.invalid
+mariadb_replication_replica_hosts:
+  - db-replica-a
+
+mariadb_replication_user: mariadb_repl
+mariadb_replication_password: "{{ vault_mariadb_replication_password }}"
+mariadb_replication_user_host: "192.0.2.%"
+mariadb_replication_mode: gtid
+mariadb_replication_gtid_use: replica_pos
+
+# Review the validation/health output before explicitly enabling channel start.
+mariadb_replication_auto_start: false
+mariadb_replication_replica_read_only: true
+mariadb_replication_force_reconfigure: false
+mariadb_replication_manage_packages: false

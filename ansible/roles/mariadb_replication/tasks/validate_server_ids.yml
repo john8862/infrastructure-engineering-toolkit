@@ -1,0 +1,81 @@
+---
+- name: Validate server IDs visible from every reachable topology host
+  block:
+    - name: Build the inspected server-ID record set
+      ansible.builtin.set_fact:
+        mariadb_replication_server_id_records: []
+
+    - name: Record each topology host with a collected server ID
+      ansible.builtin.set_fact:
+        mariadb_replication_server_id_records: >-
+          {{ mariadb_replication_server_id_records
+             + [
+               {
+                 'host': item,
+                 'server_id': hostvars[item].mariadb_replication_server_settings.server_id | int
+               }
+             ] }}
+      loop: "{{ mariadb_replication_topology_hosts }}"
+      loop_control:
+        label: "{{ item }}"
+      when:
+        - hostvars[item].mariadb_replication_server_settings is defined
+        - hostvars[item].mariadb_replication_server_settings.server_id is defined
+
+    - name: Find topology hosts that were not inspected
+      ansible.builtin.set_fact:
+        mariadb_replication_unvalidated_hosts: []
+
+    - name: Record missing inspection hosts unless their replica validation already failed
+      ansible.builtin.set_fact:
+        mariadb_replication_unvalidated_hosts: >-
+          {{ mariadb_replication_unvalidated_hosts + [item] }}
+      loop: "{{ mariadb_replication_topology_hosts }}"
+      loop_control:
+        label: "{{ item }}"
+      when:
+        - hostvars[item].mariadb_replication_server_settings is not defined
+          or hostvars[item].mariadb_replication_server_settings.server_id is not defined
+        - not hostvars[item].mariadb_replication_replica_validation_failed | default(false) | bool
+
+    - name: Require the full declared topology to be inspected on the primary
+      ansible.builtin.assert:
+        that:
+          - mariadb_replication_unvalidated_hosts | length == 0
+        fail_msg: >-
+          These declared topology hosts were not inspected by this play:
+          {{ mariadb_replication_unvalidated_hosts | join(', ') }}. Target the
+          primary and every replica together so server IDs and prerequisites
+          can be validated.
+        quiet: true
+      when: mariadb_replication_node_role == 'primary'
+
+    - name: Require unique server IDs among inspected topology hosts
+      ansible.builtin.assert:
+        that:
+          - >-
+            mariadb_replication_server_id_records
+            | map(attribute='server_id') | list | unique | list | length
+            == mariadb_replication_server_id_records | length
+        fail_msg: >-
+          MariaDB server_id values must be unique across the single-primary
+          topology. Inspected values:
+          {{ mariadb_replication_server_id_records }}
+        quiet: true
+  rescue:
+    - name: Record server-ID validation failure for the current host
+      ansible.builtin.set_fact:
+        mariadb_replication_role_failed: >-
+          {{ true if mariadb_replication_node_role == 'primary'
+             else mariadb_replication_role_failed | default(false) | bool }}
+        mariadb_replication_replica_validation_failed: >-
+          {{ true if mariadb_replication_node_role == 'replica'
+             else mariadb_replication_replica_validation_failed | default(false) | bool }}
+        mariadb_replication_validation_failure: >-
+          {{ ansible_failed_result.msg | default(
+               'Server-ID validation failed; inspect the preceding task output.') }}
+        mariadb_replication_failure_reasons: >-
+          {{ mariadb_replication_failure_reasons | default([])
+             + [ansible_failed_result.msg | default(
+                 'Server-ID validation failed; inspect the preceding task output.')]
+          }}

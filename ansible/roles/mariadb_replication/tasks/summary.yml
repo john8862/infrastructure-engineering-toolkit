@@ -1,0 +1,181 @@
+---
+- name: Print the consolidated MariaDB replication summary
+  ansible.builtin.debug:
+    msg: |
+      Primary
+      - Success: {{
+          'Success'
+          if (
+            not mariadb_replication_summary_configuration_selected
+            or (
+              mariadb_replication_summary_primary.get(
+                'mariadb_replication_primary_validation_success', false
+              ) | bool
+              and mariadb_replication_summary_primary.get(
+                'mariadb_replication_primary_configuration_success', false
+              ) | bool
+              and not mariadb_replication_summary_primary.get(
+                'mariadb_replication_role_failed', false
+              ) | bool
+            )
+          )
+          else 'Failed'
+        }}
+      - Writable: {{
+          mariadb_replication_summary_primary.get(
+            'mariadb_replication_primary_health', {}
+          ).get('writable', false)
+        }}
+      - Connected Replicas: {{
+          mariadb_replication_summary_primary.get(
+            'mariadb_replication_primary_health', {}
+          ).get('connected_replica_count', 0)
+        }}
+      - Replica List: {{
+          mariadb_replication_summary_primary.get(
+            'mariadb_replication_primary_health', {}
+          ).get('replica_list', {}) | to_json
+        }}
+      - GTID: {{
+          mariadb_replication_summary_primary.get(
+            'mariadb_replication_primary_health', {}
+          ).get('gtid', 'Unknown')
+        }}
+      - Replication Status: {{
+          mariadb_replication_summary_primary.get(
+            'mariadb_replication_primary_health', {}
+          ).get('replication_status', {}) | to_json
+        }}
+      - Validation/Configuration Errors: {{
+          mariadb_replication_summary_primary.get(
+            'mariadb_replication_failure_reasons', []
+          ) | to_json
+        }}
+
+      {% for replica in mariadb_replication_replica_hosts %}
+      {% if replica in ansible_play_hosts_all %}
+      {% set replica_facts = hostvars[replica] %}
+      {{ replica }}
+      - Success: {{
+          'Success'
+          if replica_facts.get(
+               'mariadb_replication_replica_health', {}
+             ).get('success', false) | bool
+          else 'Failed'
+        }}
+      - Validation failure: {{
+          replica_facts.get(
+            'mariadb_replication_validation_failure',
+            'Replica was unreachable or the role did not execute on this host'
+          ) or 'None'
+        }}
+      - Configuration failure: {{
+          replica_facts.get(
+            'mariadb_replication_configuration_failure', 'None'
+          ) or 'None'
+        }}
+      - IO thread: {{
+          replica_facts.get(
+            'mariadb_replication_replica_health', {}
+          ).get('io_thread', 'Unknown')
+        }}
+      - SQL thread: {{
+          replica_facts.get(
+            'mariadb_replication_replica_health', {}
+          ).get('sql_thread', 'Unknown')
+        }}
+      - Delay: {{
+          replica_facts.get(
+            'mariadb_replication_replica_health', {}
+          ).get('delay', 'Unknown')
+        }}
+      - GTID: {{
+          replica_facts.get(
+            'mariadb_replication_replica_health', {}
+          ).get('gtid', 'Unknown')
+        }}
+      - Using_Gtid: {{
+          replica_facts.get(
+            'mariadb_replication_replica_health', {}
+          ).get('using_gtid', 'Unknown')
+        }}
+      - Read Only: {{
+          replica_facts.get(
+            'mariadb_replication_replica_health', {}
+          ).get('read_only', 'Unknown')
+        }}
+      - Errors: IO={{
+          replica_facts.get(
+            'mariadb_replication_replica_health', {}
+          ).get('last_io_error', '') or 'None'
+        }}; SQL={{
+          replica_facts.get(
+            'mariadb_replication_replica_health', {}
+          ).get('last_sql_error', '') or 'None'
+        }}
+      {% else %}
+      {{ replica }}
+      - Success: Failed
+      - Validation failure: Host is not present in ansible_play_hosts_all; no changes were attempted
+      - Configuration failure: None
+      - IO thread: Unknown
+      - SQL thread: Unknown
+      - Delay: Unknown
+      - GTID: Unknown
+      - Using_Gtid: Unknown
+      - Read Only: Unknown
+      - Errors: IO=None; SQL=None
+      {% endif %}
+      {% endfor %}
+  vars:
+    mariadb_replication_summary_primary: >-
+      {{ hostvars[mariadb_replication_initial_primary]
+         if mariadb_replication_initial_primary in ansible_play_hosts_all else {} }}
+    mariadb_replication_summary_configuration_selected: >-
+      {{ (ansible_run_tags | default(['all'])
+          | intersect(['all', 'configure', 'replication'])) | length > 0 }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - always
+    - healthcheck
+
+- name: Fail the role after printing the summary when the controller or primary is unsafe
+  ansible.builtin.assert:
+    that:
+      - hostvars['localhost'].mariadb_replication_controller_environment_valid | default(false) | bool
+      - mariadb_replication_summary_primary.get(
+          'mariadb_replication_primary_validation_success', false
+        ) | bool
+      - not mariadb_replication_summary_primary.get(
+          'mariadb_replication_role_failed', false
+        ) | bool
+      - >-
+        not mariadb_replication_summary_configuration_selected
+        or mariadb_replication_summary_primary.get(
+             'mariadb_replication_primary_configuration_success', false
+           ) | bool
+    fail_msg: >-
+      MariaDB replication was not safely completed. Controller failure:
+      {{ hostvars['localhost'].mariadb_replication_controller_environment_failure
+         | default('none') }}. Primary failure reasons:
+      {{ mariadb_replication_summary_primary.get(
+           'mariadb_replication_failure_reasons', []
+         ) | to_json }}
+    quiet: true
+  vars:
+    mariadb_replication_summary_primary: >-
+      {{ hostvars[mariadb_replication_initial_primary]
+         if mariadb_replication_initial_primary in ansible_play_hosts_all else {} }}
+    mariadb_replication_summary_configuration_selected: >-
+      {{ (ansible_run_tags | default(['all'])
+          | intersect(['all', 'configure', 'replication'])) | length > 0 }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - always
+    - validate
+    - configure
+    - replication

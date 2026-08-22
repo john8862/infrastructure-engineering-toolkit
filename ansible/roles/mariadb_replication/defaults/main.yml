@@ -1,0 +1,111 @@
+---
+# Topology. These values intentionally have no site-specific defaults.
+# The host names in this section are inventory host names, not necessarily
+# the DNS name or address used by replicas to connect to the primary.
+mariadb_replication_node_role: ""
+mariadb_replication_initial_primary: ""
+mariadb_replication_primary_host: ""
+mariadb_replication_replica_hosts: []
+mariadb_replication_topology_hosts: >-
+  {{ ([mariadb_replication_initial_primary] + mariadb_replication_replica_hosts)
+     | unique }}
+
+# Controller and managed-node runtime checks.
+# ansible_playbook_python is the Python interpreter that launched Ansible and
+# therefore is the least surprising default for a reusable role.
+mariadb_replication_controller_python: "{{ ansible_playbook_python | default('') }}"
+mariadb_replication_controller_venv_path: ""
+mariadb_replication_verify_controller_environment: true
+mariadb_replication_required_controller_python_modules:
+  - ansible
+  - pymysql
+mariadb_replication_check_ansible_lint_dependency: false
+mariadb_replication_remote_python_modules:
+  - pymysql
+
+# Optional package installation. Repository setup and version selection stay
+# outside this role. The normal/default path assumes MariaDB is already
+# installed and running, which allows all safety pre-checks to run first.
+mariadb_replication_manage_packages: false
+mariadb_replication_packages: []
+mariadb_replication_package_state: present
+mariadb_replication_manage_service: true
+mariadb_replication_service_name: mariadb
+mariadb_replication_service_state: started
+
+# Local administrative connection. A credential file is preferred for
+# production use; passwords supplied through inventory should be vaulted.
+mariadb_replication_admin_login_user: null
+mariadb_replication_admin_login_password: null
+mariadb_replication_admin_login_host: localhost
+mariadb_replication_admin_login_port: 3306
+mariadb_replication_admin_unix_socket: ""
+mariadb_replication_admin_config_file: "~/.my.cnf"
+mariadb_replication_connect_timeout: 30
+
+# Replication account and connection settings.
+mariadb_replication_user: ""
+mariadb_replication_password: ""
+# Require the caller to choose the replica source range explicitly. A
+# wildcard account host is intentionally not a public default.
+mariadb_replication_user_host: ""
+mariadb_replication_port: 3306
+mariadb_replication_connect_retry: 10
+mariadb_replication_user_privileges: "*.*:REPLICATION SLAVE"
+
+# Replication position mode. GTID is the safe default recommended by MariaDB
+# for new standard replication topologies. replica_pos is translated by the
+# ansible.mariadb module to the MariaDB 11/12-compatible slave_pos spelling.
+mariadb_replication_mode: gtid
+mariadb_replication_gtid_use: replica_pos
+mariadb_replication_require_gtid_strict_mode: false
+mariadb_replication_require_replica_binlog: false
+
+# Traditional binary-log file/position coordinates. A per-inventory-host
+# entry in mariadb_replication_log_coordinates overrides the global values.
+mariadb_replication_primary_log_file: ""
+mariadb_replication_primary_log_pos: null
+mariadb_replication_log_coordinates: {}
+
+# TLS settings for the replication channel. Every path is an existing path on
+# each replica. This role never creates, requests, copies, or renews certs.
+mariadb_replication_ssl_enabled: false
+mariadb_replication_ssl_ca: ""
+mariadb_replication_ssl_client_certificate: ""
+mariadb_replication_ssl_client_key: ""
+mariadb_replication_ssl_require_client_certificate: false
+mariadb_replication_ssl_verify_server_cert: true
+mariadb_replication_ssl_check_hostname: false
+
+# Desired replica state.
+mariadb_replication_replica_read_only: true
+mariadb_replication_auto_start: true
+# Passwords are not exposed by SHOW REPLICA STATUS. Set this to true when a
+# replication password or another connection-only setting was deliberately
+# rotated and must be sent again with CHANGE MASTER TO.
+mariadb_replication_force_reconfigure: false
+
+# Data consistency validation. An empty database list means all non-system
+# databases. CHECKSUM TABLE ... EXTENDED is intentionally explicit and can be
+# expensive; run the role during a quiesced write window for a deterministic
+# result. A mismatch only blocks that replica.
+mariadb_replication_consistency_databases: []
+mariadb_replication_consistency_excluded_databases:
+  - information_schema
+  - performance_schema
+  - mysql
+  - sys
+mariadb_replication_consistency_excluded_tables: []
+mariadb_replication_consistency_checksum_mode: extended
+mariadb_replication_consistency_allow_null_checksum: false
+
+# Network checks protect the primary from an unusable replication endpoint.
+# The role does not edit bind-address, skip-networking, or server option files.
+mariadb_replication_validate_network: true
+mariadb_replication_allow_loopback_bind: false
+mariadb_replication_require_log_basename: true
+
+# The role reports health even when a replica is deliberately skipped. The
+# final assertion fails only for a primary/controller failure; replica
+# validation failures are recorded in the consolidated summary.
+mariadb_replication_healthcheck_enabled: true

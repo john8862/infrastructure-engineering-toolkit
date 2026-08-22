@@ -1,0 +1,93 @@
+---
+- name: Validate topology inputs
+  ansible.builtin.assert:
+    that:
+      - mariadb_replication_node_role in ['primary', 'replica']
+      - mariadb_replication_initial_primary | length > 0
+      - mariadb_replication_initial_primary in mariadb_replication_topology_hosts
+      - inventory_hostname in mariadb_replication_topology_hosts
+      - mariadb_replication_replica_hosts | length > 0
+      - mariadb_replication_initial_primary not in mariadb_replication_replica_hosts
+      - mariadb_replication_topology_hosts | length == (mariadb_replication_replica_hosts | length + 1)
+      - mariadb_replication_replica_hosts | unique | length == mariadb_replication_replica_hosts | length
+      - >-
+        (mariadb_replication_topology_hosts | sort)
+        == (
+          ([mariadb_replication_initial_primary] + mariadb_replication_replica_hosts)
+          | unique | list | sort
+        )
+      - >-
+        (mariadb_replication_node_role == 'primary'
+         and inventory_hostname == mariadb_replication_initial_primary)
+        or
+        (mariadb_replication_node_role == 'replica'
+         and inventory_hostname in mariadb_replication_replica_hosts)
+    fail_msg: >-
+      Set a single-primary topology with mariadb_replication_node_role,
+      mariadb_replication_initial_primary, mariadb_replication_primary_host,
+      and mariadb_replication_replica_hosts. Apply the role only to the
+      declared topology hosts.
+    quiet: true
+
+- name: Validate replication account and transport inputs
+  ansible.builtin.assert:
+    that:
+      - mariadb_replication_user | length > 0
+      - mariadb_replication_user is match('^[A-Za-z0-9_.$-]+$')
+      - mariadb_replication_password | length > 0
+      - mariadb_replication_user_host | length > 0
+      - mariadb_replication_user_host is match('^[A-Za-z0-9%_.:*?/-]+$')
+      - mariadb_replication_port | int >= 1
+      - mariadb_replication_port | int <= 65535
+      - mariadb_replication_connect_retry | int >= 0
+      - mariadb_replication_user_privileges is search('(?i)REPLICATION[ _](SLAVE|REPLICA)')
+    fail_msg: >-
+      Supply a non-empty replication user/password, a valid account host,
+      a TCP port, and the minimum REPLICATION SLAVE/REPLICA privilege.
+    quiet: true
+
+- name: Validate replication mode inputs
+  ansible.builtin.assert:
+    that:
+      - mariadb_replication_mode in ['gtid', 'position']
+      - mariadb_replication_gtid_use in ['replica_pos', 'current_pos']
+      - mariadb_replication_consistency_checksum_mode in ['default', 'extended']
+      - mariadb_replication_consistency_databases is sequence
+      - mariadb_replication_consistency_databases is not string
+      - mariadb_replication_consistency_excluded_databases is sequence
+      - mariadb_replication_consistency_excluded_databases is not string
+      - mariadb_replication_consistency_excluded_tables is sequence
+      - mariadb_replication_consistency_excluded_tables is not string
+    fail_msg: >-
+      mariadb_replication_mode must be gtid or position; GTID selection must
+      be replica_pos/current_pos; consistency lists must be YAML sequences.
+    quiet: true
+
+- name: Validate TLS input shape
+  ansible.builtin.assert:
+    that:
+      - >-
+        not mariadb_replication_ssl_enabled | bool
+        or (
+          mariadb_replication_ssl_ca | length > 0
+          and mariadb_replication_ssl_ca is match('^/')
+        )
+      - >-
+        (mariadb_replication_ssl_client_certificate | length == 0
+         and mariadb_replication_ssl_client_key | length == 0)
+        or
+        (mariadb_replication_ssl_client_certificate | length > 0
+         and mariadb_replication_ssl_client_key | length > 0)
+      - >-
+        not mariadb_replication_ssl_require_client_certificate | bool
+        or (
+          mariadb_replication_ssl_enabled | bool
+          and
+          mariadb_replication_ssl_client_certificate | length > 0
+          and mariadb_replication_ssl_client_key | length > 0
+        )
+    fail_msg: >-
+      SSL requires an absolute existing CA path. Client certificate and key
+      must be supplied together; client authentication cannot be requested
+      without both files.
+    quiet: true

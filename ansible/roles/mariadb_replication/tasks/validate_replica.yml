@@ -1,0 +1,243 @@
+---
+- name: Validate this replica without failing other replicas
+  block:
+    - name: Validate this replica's primary endpoint
+      ansible.builtin.assert:
+        that:
+          - mariadb_replication_primary_host | length > 0
+        fail_msg: >-
+          Each replica must set mariadb_replication_primary_host to the TCP
+          address or DNS name of the initial primary.
+        quiet: true
+
+    - name: Calculate the effective binary-log coordinates for this replica
+      ansible.builtin.set_fact:
+        mariadb_replication_effective_log_coordinates: >-
+          {{ mariadb_replication_log_coordinates.get(inventory_hostname, {}) }}
+        mariadb_replication_effective_log_file: >-
+          {{ mariadb_replication_log_coordinates.get(inventory_hostname, {}).get(
+               'file', mariadb_replication_primary_log_file) }}
+        mariadb_replication_effective_log_pos: >-
+          {{ mariadb_replication_log_coordinates.get(inventory_hostname, {}).get(
+               'position', mariadb_replication_primary_log_pos) }}
+
+    - name: Validate traditional binary-log coordinates on this replica
+      ansible.builtin.assert:
+        that:
+          - mariadb_replication_effective_log_file | length > 0
+          - mariadb_replication_effective_log_pos is not none
+          - mariadb_replication_effective_log_pos | int >= 4
+        fail_msg: >-
+          Position mode requires a per-replica or global primary log file and a
+          numeric position of at least 4 that matches the consistent data copy.
+        quiet: true
+      when: mariadb_replication_mode == 'position'
+
+    - name: Gather minimum managed-replica facts for dependency checks
+      ansible.builtin.setup:
+        gather_subset:
+          - min
+
+    - name: Verify required Python modules on the managed replica
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_facts.python.executable | default(ansible_python_interpreter | default('python3')) }}"
+          - -c
+          - >-
+            import importlib.util, sys;
+            modules = {{ mariadb_replication_remote_python_modules | to_json }};
+            missing = [name for name in modules if importlib.util.find_spec(name) is None];
+            sys.exit("Missing Python modules: " + ", ".join(missing) if missing else 0)
+      register: mariadb_replication_replica_dependency_check
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Fail this replica validation when managed-node dependencies are missing
+      ansible.builtin.assert:
+        that:
+          - mariadb_replication_replica_dependency_check.rc | int == 0
+        fail_msg: >-
+          This replica is missing a required Python dependency for the MariaDB
+          Ansible modules. Install the modules listed in
+          mariadb_replication_remote_python_modules on the managed node.
+        quiet: true
+
+    - name: Collect replica MariaDB version and settings
+      ansible.mariadb.mariadb_info:
+        filter:
+          - version
+          - settings
+          - slave_status
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_info
+      check_mode: false
+
+    - name: Store replica version-aware facts
+      ansible.builtin.set_fact:
+        mariadb_replication_server_version: "{{ mariadb_replication_info.version }}"
+        mariadb_replication_server_settings: "{{ mariadb_replication_info.settings }}"
+        mariadb_replication_read_only_value: >-
+          {{ 'ON' if mariadb_replication_info.version.major | int >= 12 else '1' }}
+
+    - name: Validate the supported replica version and identity
+      ansible.builtin.assert:
+        that:
+          - mariadb_replication_info.server_engine | default('') | lower == 'mariadb'
+          - mariadb_replication_info.version.suffix | default('') | lower is search('mariadb')
+          - mariadb_replication_info.version.major | int in [11, 12]
+          - mariadb_replication_info.settings.server_id is defined
+          - mariadb_replication_info.settings.server_id | int >= 1
+          - mariadb_replication_info.settings.server_id | int <= 4294967295
+          - >-
+            not mariadb_replication_require_log_basename | bool
+            or mariadb_replication_info.settings.log_bin_basename
+               | default('') | string | length > 0
+          - hostvars[mariadb_replication_initial_primary].mariadb_replication_primary_validation_success | default(false) | bool
+          - hostvars[mariadb_replication_initial_primary].mariadb_replication_primary_user_privileges_valid | default(false) | bool
+          - hostvars[mariadb_replication_initial_primary].mariadb_replication_primary_consistency_ready | default(false) | bool
+        fail_msg: >-
+          This replica must be MariaDB 11.x or 12.x with a valid server_id,
+          stable binary-log basename, and a successfully validated initial
+          primary.
+        quiet: true
+
+    - name: Validate replica GTID prerequisites
+      ansible.builtin.assert:
+        that:
+          - mariadb_replication_info.settings.gtid_domain_id is defined
+          - mariadb_replication_info.settings.gtid_slave_pos is defined
+          - mariadb_replication_info.settings.gtid_current_pos is defined
+          - >-
+            not mariadb_replication_require_gtid_strict_mode | bool
+            or (mariadb_replication_info.settings.gtid_strict_mode | string | lower) in ['on', '1', 'yes']
+          - >-
+            (hostvars[mariadb_replication_initial_primary].mariadb_replication_info.settings.gtid_binlog_pos
+             | default('') | string | length == 0)
+            or (mariadb_replication_info.settings.gtid_slave_pos | default('') | string | length > 0)
+        fail_msg: >-
+          GTID mode requires gtid_domain_id, gtid_slave_pos, and
+          gtid_current_pos on the replica. A non-empty primary GTID position
+          also requires a preloaded replica GTID position that matches the
+          consistent data copy.
+        quiet: true
+      when: mariadb_replication_mode == 'gtid'
+
+    - name: Validate replica binary logging when explicitly required
+      ansible.builtin.assert:
+        that:
+          - (mariadb_replication_info.settings.log_bin | default('OFF') | string | lower) in ['on', '1', 'yes']
+        fail_msg: >-
+          mariadb_replication_require_replica_binlog is true, but this replica
+          does not have binary logging enabled. The role does not change it.
+        quiet: true
+      when: mariadb_replication_require_replica_binlog | bool
+
+    - name: Validate replica TLS capability when replication TLS is enabled
+      ansible.builtin.assert:
+        that:
+          - (mariadb_replication_info.settings.have_ssl | default('NO') | string | lower) in ['yes', 'on', '1']
+        fail_msg: >-
+          mariadb_replication_ssl_enabled is true, but this replica does not
+          report TLS support through have_ssl.
+        quiet: true
+      when: mariadb_replication_ssl_enabled | bool
+
+    - name: Check the existing TLS files on this replica
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: true
+      loop: >-
+        {{ [mariadb_replication_ssl_ca]
+           + (
+             [mariadb_replication_ssl_client_certificate,
+              mariadb_replication_ssl_client_key]
+             if mariadb_replication_ssl_client_certificate | length > 0
+             else []
+           ) }}
+      register: mariadb_replication_replica_ssl_file_stats
+      when: mariadb_replication_ssl_enabled | bool
+
+    - name: Fail this replica when a supplied TLS file is unavailable
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false) | bool
+          - item.stat.isreg | default(false) | bool
+        fail_msg: >-
+          TLS file {{ item.item }} does not exist as a regular file on this
+          replica. The role consumes existing certificate assets only.
+        quiet: true
+      loop: "{{ mariadb_replication_replica_ssl_file_stats.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: mariadb_replication_ssl_enabled | bool
+
+    - name: Validate connectivity to the primary with the replication account
+      ansible.mariadb.mariadb_query:
+        query: SELECT 1 AS connectivity
+        login_user: "{{ mariadb_replication_user }}"
+        login_password: "{{ mariadb_replication_password }}"
+        login_host: "{{ mariadb_replication_primary_host }}"
+        login_port: "{{ mariadb_replication_port }}"
+        login_unix_socket: ""
+        config_file: ""
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+        client_cert: >-
+          {{ mariadb_replication_ssl_client_certificate
+             if (
+               mariadb_replication_ssl_enabled | bool
+               and mariadb_replication_ssl_client_certificate | length > 0
+             ) else omit }}
+        client_key: >-
+          {{ mariadb_replication_ssl_client_key
+             if (
+               mariadb_replication_ssl_enabled | bool
+               and mariadb_replication_ssl_client_key | length > 0
+             ) else omit }}
+        ca_cert: "{{ mariadb_replication_ssl_ca if mariadb_replication_ssl_enabled | bool else omit }}"
+        check_hostname: "{{ mariadb_replication_ssl_check_hostname if mariadb_replication_ssl_enabled | bool else omit }}"
+      register: mariadb_replication_primary_connectivity
+      no_log: true
+      check_mode: false
+
+    - name: Confirm the primary connectivity probe succeeded
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              mariadb_replication_primary_connectivity.query_result
+              | default([[]]) | first | default([]) | first | default({})
+            ).get('connectivity') | int == 1
+        fail_msg: >-
+          The replication account could not connect to the configured primary
+          endpoint from this replica. Verify DNS/routing/firewall, account
+          host matching, password, port, and TLS settings.
+        quiet: true
+
+    - name: Collect and compare this replica's application table checksums
+      ansible.builtin.import_tasks: consistency_replica.yml
+
+    - name: Mark this replica validation successful
+      ansible.builtin.set_fact:
+        mariadb_replication_replica_validation_success: true
+        mariadb_replication_validation_failure: ""
+  rescue:
+    - name: Record this replica validation failure and continue the topology
+      ansible.builtin.set_fact:
+        mariadb_replication_replica_validation_failed: true
+        mariadb_replication_replica_validation_success: false
+        mariadb_replication_validation_failure: >-
+          {{ (
+               ansible_failed_result.results | default([])
+               | selectattr('failed', 'equalto', true)
+               | map(attribute='msg') | list | join('; ')
+             ) or (
+               ansible_failed_result.msg | default(
+                 'Replica validation failed; inspect the preceding task output.')
+             ) }}

@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  author: Infrastructure Engineering Toolkit contributors
+  description: Configure MariaDB 11.x and 12.x single-primary standard replication
+  license: MIT
+  min_ansible_version: "2.15"
+  standalone: true
+  platforms:
+    - name: GenericUNIX
+      versions:
+        - all
+  galaxy_tags:
+    - database
+    - mariadb
+    - replication
+    - gtid
+    - tls
+dependencies: []
