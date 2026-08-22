@@ -1,0 +1,66 @@
+global_defs {
+    router_id {{ keepalived_router_id }}
+{% if keepalived_script_security_enabled | bool %}    enable_script_security
+{% endif %}{% if keepalived_script_user | length > 0 %}    script_user {{ keepalived_script_user }} {{ keepalived_script_group }}
+{% endif %}    vrrp_garp_master_delay {{ keepalived_garp_master_delay }}
+    vrrp_garp_master_repeat {{ keepalived_garp_master_repeat }}
+    vrrp_garp_master_refresh {{ keepalived_garp_master_refresh }}
+    vrrp_garp_master_refresh_repeat {{ keepalived_garp_master_refresh_repeat }}
+    vrrp_garp_interval {{ keepalived_garp_interval }}
+{% if keepalived_snmp_enabled | bool %}    enable_snmp
+{% endif %}{% if keepalived_snmp_checker | bool %}    enable_snmp_checker
+{% endif %}{% if keepalived_snmp_rfc | bool %}    enable_snmp_rfc
+{% endif %}{% if keepalived_snmp_rfcv2 | bool %}    enable_snmp_rfcv2
+{% endif %}{% if keepalived_snmp_rfcv3 | bool %}    enable_snmp_rfcv3
+{% endif %}{% if keepalived_snmp_traps | bool %}    enable_snmp_traps
+{% endif %}}
+
+{% for script in keepalived_vrrp_instances_effective | map(attribute='track_scripts') | flatten | unique(attribute='name') %}
+vrrp_script {{ script.name }} {
+    script "{{ script.script }}"
+    user {{ script.user | default(keepalived_script_user) }} {{ script.group | default(keepalived_script_group) }}
+    interval {{ script.interval | default(2) }}
+    timeout {{ script.timeout | default(3) }}
+    fall {{ script.fall | default(2) }}
+    rise {{ script.rise | default(2) }}
+{% if script.weight is defined and script.weight | int != 0 %}    weight {{ script.weight }}
+{% endif %}}
+
+{% endfor %}
+{% for group in keepalived_sync_groups %}
+vrrp_sync_group {{ group.name }} {
+{% for instance in group.instances %}    group {{ instance }}
+{% endfor %}}
+
+{% endfor %}
+{% for instance in keepalived_vrrp_instances_effective %}
+vrrp_instance {{ instance.name }} {
+    state {{ instance.state | upper }}
+    interface {{ instance.interface }}
+    virtual_router_id {{ instance.virtual_router_id }}
+    priority {{ instance.priority }}
+    advert_int {{ instance.advert_int }}
+{% if instance.version is defined and instance.version | string | length > 0 %}    version {{ instance.version }}
+{% endif %}{% if instance.mode | lower == 'unicast' %}    unicast_src_ip {{ instance.unicast_src_ip }}
+    unicast_peer {
+{% for peer in instance.unicast_peers %}        {{ peer }}
+{% endfor %}    }
+{% if keepalived_unicast_fault_no_peer | bool %}    unicast_fault_no_peer
+{% endif %}{% endif %}{% if instance.auth_type | upper != 'NONE' %}    authentication {
+        auth_type {{ instance.auth_type | upper }}
+        auth_pass {{ instance.auth_pass }}
+    }
+{% endif %}    virtual_ipaddress {
+{% for address in instance.virtual_ip_addresses %}{% if address is string %}        {{ address }} dev {{ instance.interface }}
+{% else %}        {{ address.address }}{% if address.prefix is defined %}/{{ address.prefix }}{% endif %} dev {{ address.interface | default(instance.interface) }}{% if address.label is defined and address.label | length > 0 %} label {{ address.label }}{% endif %}
+{% endif %}{% endfor %}    }
+{% if instance.track_scripts | length > 0 %}    track_script {
+{% for script in instance.track_scripts %}        {{ script.name }}
+{% endfor %}    }
+{% endif %}{% if instance.notify.master | default(keepalived_notify_script_default) | length > 0 %}    notify_master "{{ instance.notify.master | default(keepalived_notify_script_default) }}"
+{% endif %}{% if instance.notify.backup | default(keepalived_notify_script_default) | length > 0 %}    notify_backup "{{ instance.notify.backup | default(keepalived_notify_script_default) }}"
+{% endif %}{% if instance.notify.fault | default(keepalived_notify_script_default) | length > 0 %}    notify_fault "{{ instance.notify.fault | default(keepalived_notify_script_default) }}"
+{% endif %}{% if instance.notify.stop | default(keepalived_notify_script_default) | length > 0 %}    notify_stop "{{ instance.notify.stop | default(keepalived_notify_script_default) }}"
+{% endif %}}
+
+{% endfor %}

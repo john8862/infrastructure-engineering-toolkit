@@ -1,0 +1,98 @@
+---
+# Generic Keepalived role defaults.
+#
+# The role knows only about Keepalived. Callers describe one or more
+# independent VRRP instances through keepalived_vrrp_instances. It does not
+# assume a database, proxy, DNS service, or application-specific health rule.
+
+keepalived_enabled: false
+keepalived_package: keepalived
+keepalived_service: keepalived
+
+# Existing deployments are protected by default. A running configuration is
+# validation-only unless a caller explicitly opts into reconciliation during
+# planned maintenance.
+keepalived_existing_deployment_mode: auto
+keepalived_existing_deployment_reconcile_enabled: false
+
+keepalived_runtime_packages: []
+keepalived_manage_package: true
+keepalived_manage_service: true
+keepalived_conflicting_services: []
+
+# Firewall management is opt-in. When enabled, this role only manages generic
+# VRRP protocol rules through an already-installed UFW command.
+keepalived_firewall_enabled: false
+keepalived_firewall_sources: []
+
+keepalived_config_file: /etc/keepalived/keepalived.conf
+keepalived_config_directory: "{{ keepalived_config_file | dirname }}"
+keepalived_config_mode: "0640"
+keepalived_config_validation_enabled: true
+keepalived_validation_binary: /usr/sbin/keepalived
+keepalived_validation_command: "{{ keepalived_validation_binary }} -t -f %s"
+
+keepalived_router_id: "{{ inventory_hostname | default('ha-node') }}"
+keepalived_script_security_enabled: true
+keepalived_script_user: keepalived-health
+keepalived_script_group: keepalived-health
+keepalived_script_user_manage: true
+keepalived_script_uid: ""
+keepalived_script_gid: ""
+keepalived_script_home: /nonexistent
+keepalived_script_shell: /usr/sbin/nologin
+keepalived_script_directory: /usr/local/sbin
+keepalived_script_mode: "0750"
+
+keepalived_state_log_directory: /var/log/keepalived
+keepalived_state_log: "{{ keepalived_state_log_directory }}/state.log"
+keepalived_state_log_owner: "{{ keepalived_script_user }}"
+keepalived_state_log_group: "{{ keepalived_script_group }}"
+keepalived_state_log_mode: "0640"
+keepalived_logrotate_enabled: false
+keepalived_logrotate_file: /etc/logrotate.d/keepalived
+keepalived_logrotate_frequency: daily
+keepalived_logrotate_rotate: 14
+keepalived_logrotate_compress: true
+keepalived_logrotate_delaycompress: true
+keepalived_logrotate_missingok: true
+keepalived_logrotate_notifempty: true
+keepalived_logrotate_create_mode: "0640"
+keepalived_logrotate_create_owner: "{{ keepalived_state_log_owner }}"
+keepalived_logrotate_create_group: "{{ keepalived_state_log_group }}"
+
+keepalived_systemd_ordering_enabled: false
+keepalived_systemd_override: /etc/systemd/system/keepalived.service.d/ordering.conf
+keepalived_systemd_after_units:
+  - network-online.target
+keepalived_systemd_requires_units: []
+
+keepalived_garp_master_delay: 1
+keepalived_garp_master_repeat: 2
+keepalived_garp_master_refresh: 60
+keepalived_garp_master_refresh_repeat: 2
+keepalived_garp_interval: 0.001
+keepalived_snmp_enabled: false
+keepalived_snmp_checker: false
+keepalived_snmp_rfc: false
+keepalived_snmp_rfcv2: false
+keepalived_snmp_rfcv3: false
+keepalived_snmp_traps: false
+
+# Host names used to derive unicast peer addresses when an instance does not
+# provide its own unicast_peers list. The role never assumes a group name.
+keepalived_peer_inventory_group: ""
+keepalived_peer_hosts: []
+keepalived_unicast_src_ip: ""
+keepalived_unicast_fault_no_peer: true
+
+# Each instance is independent. An empty sync-group list is intentional:
+# callers must opt in explicitly if they require synchronized VRRP.
+keepalived_sync_groups: []
+keepalived_vrrp_instances: []
+
+# Set to false when the caller only wants package/configuration reconciliation
+# and will manage the daemon elsewhere. It is also useful for staged
+# bootstrap workflows.
+keepalived_validate_script_paths: false
+keepalived_notify_script_default: ""

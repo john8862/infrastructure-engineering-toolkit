@@ -1,0 +1,5 @@
+[Unit]
+Wants={{ keepalived_systemd_after_units | join(' ') }}
+After={{ keepalived_systemd_after_units | join(' ') }}
+{% if keepalived_systemd_requires_units | length > 0 %}Requires={{ keepalived_systemd_requires_units | join(' ') }}
+{% endif %}

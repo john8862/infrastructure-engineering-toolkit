@@ -1,0 +1,9 @@
+{{ keepalived_state_log }} {
+    {{ keepalived_logrotate_frequency }}
+    rotate {{ keepalived_logrotate_rotate }}
+{% if keepalived_logrotate_compress | bool %}    compress
+{% endif %}{% if keepalived_logrotate_delaycompress | bool %}    delaycompress
+{% endif %}{% if keepalived_logrotate_missingok | bool %}    missingok
+{% endif %}{% if keepalived_logrotate_notifempty | bool %}    notifempty
+{% endif %}    create {{ keepalived_logrotate_create_mode }} {{ keepalived_logrotate_create_owner }} {{ keepalived_logrotate_create_group }}
+}
