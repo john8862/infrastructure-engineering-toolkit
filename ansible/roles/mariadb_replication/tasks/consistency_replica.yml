@@ -1,0 +1,155 @@
+---
+- name: Build the replica consistency SQL scope
+  ansible.builtin.set_fact:
+    mariadb_replication_consistency_excluded_database_sql: >-
+      {% for database in mariadb_replication_consistency_excluded_databases %}
+      '{{ database | replace("'", "''") }}'{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    mariadb_replication_consistency_included_database_sql: >-
+      {% for database in mariadb_replication_consistency_databases %}
+      '{{ database | replace("'", "''") }}'{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    mariadb_replication_consistency_checksum_clause: >-
+      {{ 'EXTENDED' if mariadb_replication_consistency_checksum_mode == 'extended' else '' }}
+
+- name: Query the replica application table catalog
+  ansible.mariadb.mariadb_query:
+    query: >-
+      SELECT TABLE_SCHEMA AS table_schema,
+             TABLE_NAME AS table_name,
+             ENGINE AS engine,
+             TABLE_TYPE AS table_type
+      FROM information_schema.TABLES
+      WHERE TABLE_TYPE = 'BASE TABLE'
+        AND TABLE_SCHEMA NOT IN ({{ mariadb_replication_consistency_excluded_database_sql }})
+        {% if mariadb_replication_consistency_databases | length > 0 %}
+        AND TABLE_SCHEMA IN ({{ mariadb_replication_consistency_included_database_sql }})
+        {% endif %}
+      ORDER BY TABLE_SCHEMA, TABLE_NAME
+    login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+    login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+    login_host: "{{ mariadb_replication_admin_login_host }}"
+    login_port: "{{ mariadb_replication_admin_login_port }}"
+    login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+    config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+    connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+  register: mariadb_replication_replica_catalog_query
+  check_mode: false
+
+- name: Select replica tables covered by the consistency contract
+  ansible.builtin.set_fact:
+    mariadb_replication_replica_consistency_tables: []
+
+- name: Exclude operator-specified replica tables from the consistency contract
+  ansible.builtin.set_fact:
+    mariadb_replication_replica_consistency_tables: >-
+      {{ mariadb_replication_replica_consistency_tables
+         + [item | combine({'table_key': item.table_schema ~ '.' ~ item.table_name})] }}
+  loop: >-
+    {{ mariadb_replication_replica_catalog_query.query_result
+       | default([[]]) | first | default([]) }}
+  loop_control:
+    label: "{{ item.table_schema }}.{{ item.table_name }}"
+  when:
+    - (item.table_schema ~ '.' ~ item.table_name) not in mariadb_replication_consistency_excluded_tables
+
+- name: Calculate replica table checksums
+  ansible.mariadb.mariadb_query:
+    query: >-
+      CHECKSUM TABLE
+      `{{ item.table_schema | replace('`', '``') }}`.`{{ item.table_name | replace('`', '``') }}`
+      {{ mariadb_replication_consistency_checksum_clause }}
+    login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+    login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+    login_host: "{{ mariadb_replication_admin_login_host }}"
+    login_port: "{{ mariadb_replication_admin_login_port }}"
+    login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+    config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+    connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+  loop: "{{ mariadb_replication_replica_consistency_tables }}"
+  loop_control:
+    label: "{{ item.table_key }}"
+  register: mariadb_replication_replica_checksum_queries
+  check_mode: false
+
+- name: Initialize the replica consistency records
+  ansible.builtin.set_fact:
+    mariadb_replication_replica_consistency_records: []
+
+- name: Normalize the replica consistency records
+  ansible.builtin.set_fact:
+    mariadb_replication_replica_consistency_records: >-
+      {{ mariadb_replication_replica_consistency_records | default([]) + [
+        {
+          'table_key': item.item.table_key,
+          'engine': item.item.engine,
+          'checksum': (
+            item.query_result | default([[]]) | first | default([])
+            | first | default({})
+          ).get('Checksum')
+        }
+      ] }}
+  loop: "{{ mariadb_replication_replica_checksum_queries.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.table_key }}"
+
+- name: Reject unavailable replica checksums unless explicitly allowed
+  ansible.builtin.assert:
+    that:
+      - item.checksum is not none
+    fail_msg: >-
+      CHECKSUM TABLE returned NULL for {{ item.table_key }} on this replica.
+      The replica will not be configured until the consistency contract can
+      be verified.
+    quiet: true
+  loop: "{{ mariadb_replication_replica_consistency_records }}"
+  loop_control:
+    label: "{{ item.table_key }}"
+  when: not mariadb_replication_consistency_allow_null_checksum | bool
+
+- name: Verify identical primary and replica table inventories
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          mariadb_replication_replica_consistency_records
+          | map(attribute='table_key') | list | sort
+        ) == (
+          hostvars[mariadb_replication_initial_primary]
+          .mariadb_replication_primary_consistency_records
+          | map(attribute='table_key') | list | sort
+        )
+    fail_msg: >-
+      The replica table inventory differs from the primary. Replica data
+      initialization is outside this role; synchronize the replica first.
+    quiet: true
+
+- name: Verify identical table engines and checksums
+  ansible.builtin.assert:
+    that:
+      - >-
+        item.engine == (
+          hostvars[mariadb_replication_initial_primary]
+          .mariadb_replication_primary_consistency_records
+          | selectattr('table_key', 'equalto', item.table_key)
+          | map(attribute='engine') | first | default('')
+        )
+      - >-
+        (item.checksum | string) == (
+          hostvars[mariadb_replication_initial_primary]
+          .mariadb_replication_primary_consistency_records
+          | selectattr('table_key', 'equalto', item.table_key)
+          | map(attribute='checksum') | first | default('')
+          | string
+        )
+    fail_msg: >-
+      Table {{ item.table_key }} differs from the primary by storage engine or
+      checksum. Replica data initialization is outside this role.
+    quiet: true
+  loop: "{{ mariadb_replication_replica_consistency_records }}"
+  loop_control:
+    label: "{{ item.table_key }}"
+
+- name: Mark replica data consistency validation successful
+  ansible.builtin.set_fact:
+    mariadb_replication_replica_consistency_ready: true

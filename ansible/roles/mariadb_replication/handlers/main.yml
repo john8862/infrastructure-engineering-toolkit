@@ -1,0 +1,4 @@
+---
+# This role changes runtime replication state with the official MariaDB
+# modules. Server option files and service restarts are intentionally outside
+# the role's scope.

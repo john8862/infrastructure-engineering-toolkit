@@ -1,0 +1,181 @@
+---
+- name: Collect primary health data
+  when: mariadb_replication_node_role == 'primary'
+  block:
+    - name: Read primary replication and writable-state health
+      ansible.mariadb.mariadb_info:
+        filter:
+          - settings
+          - master_status
+          - slave_status
+          - slave_hosts
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_primary_health_info
+      failed_when: false
+      check_mode: false
+
+    - name: Normalize primary health data
+      ansible.builtin.set_fact:
+        mariadb_replication_primary_health:
+          success: "{{ not mariadb_replication_primary_health_info.failed | default(false) | bool }}"
+          writable: >-
+            {{ (
+              mariadb_replication_primary_health_info.settings.read_only
+              | default('ON') | string | lower
+            ) in ['off', '0', 'no'] }}
+          read_only: >-
+            {{ mariadb_replication_primary_health_info.settings.read_only
+               | default('Unknown') }}
+          connected_replica_count: >-
+            {{ mariadb_replication_primary_health_info.slave_hosts
+               | default({}) | length }}
+          replica_list: >-
+            {{ mariadb_replication_primary_health_info.slave_hosts
+               | default({}) }}
+          gtid: >-
+            {{ mariadb_replication_primary_health_info.settings.gtid_binlog_pos
+               | default(
+                   mariadb_replication_primary_health_info.settings.gtid_current_pos
+                   | default('Unknown')
+                 ) }}
+          replication_status: >-
+            {{ {
+              'primary': mariadb_replication_primary_health_info.master_status
+                | default({}),
+              'replica': mariadb_replication_primary_health_info.slave_status
+                | default({})
+            } }}
+          error: >-
+            {{ mariadb_replication_primary_health_info.msg
+               | default('') }}
+- name: Collect replica health data
+  when: mariadb_replication_node_role == 'replica'
+  block:
+    - name: Read replica thread health
+      ansible.mariadb.mariadb_replication:
+        mode: getreplica
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_replica_health_status
+      failed_when: false
+      changed_when: false
+      check_mode: false
+
+    - name: Read replica settings for read_only and GTID health
+      ansible.mariadb.mariadb_info:
+        filter:
+          - settings
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_replica_health_info
+      failed_when: false
+      check_mode: false
+
+    - name: Normalize replica health data
+      ansible.builtin.set_fact:
+        mariadb_replication_replica_health:
+          configured: >-
+            {{ mariadb_replication_replica_health_status.Is_Replica
+               | default(false) | bool }}
+          io_thread: >-
+            {{ mariadb_replication_replica_health_status.get(
+                 'Replica_IO_Running',
+                 mariadb_replication_replica_health_status.get(
+                   'Slave_IO_Running', 'Unknown'
+                 )
+               ) | default('Unknown') }}
+          sql_thread: >-
+            {{ mariadb_replication_replica_health_status.get(
+                 'Replica_SQL_Running',
+                 mariadb_replication_replica_health_status.get(
+                   'Slave_SQL_Running', 'Unknown'
+                 )
+               ) | default('Unknown') }}
+          delay: >-
+            {{ (
+              mariadb_replication_replica_health_status.get(
+                'Seconds_Behind_Master',
+                mariadb_replication_replica_health_status.get(
+                  'Seconds_Behind_Source', 'Unknown'
+                )
+              )
+              if mariadb_replication_replica_health_status.get(
+                'Seconds_Behind_Master',
+                mariadb_replication_replica_health_status.get(
+                  'Seconds_Behind_Source', none
+                )
+              ) is not none else 'Unknown'
+            ) }}
+          last_io_error: >-
+            {{ mariadb_replication_replica_health_status.get(
+                 'Last_IO_Error', ''
+               ) | default('') }}
+          last_sql_error: >-
+            {{ mariadb_replication_replica_health_status.get(
+                 'Last_SQL_Error', ''
+               ) | default('') }}
+          using_gtid: >-
+            {{ mariadb_replication_replica_health_status.get(
+                 'Using_Gtid', 'Unknown'
+               ) | default('Unknown') }}
+          gtid: >-
+            {{ mariadb_replication_replica_health_status.get(
+                 'Gtid_Slave_Pos',
+                 mariadb_replication_replica_health_info.settings.gtid_slave_pos
+                 | default('Unknown')
+               ) | default('Unknown') }}
+          read_only: >-
+            {{ mariadb_replication_replica_health_info.settings.read_only
+               | default('Unknown') }}
+          validation_failure: >-
+            {{ mariadb_replication_validation_failure | default('') }}
+          error: >-
+            {{ mariadb_replication_replica_health_status.msg
+               | default(mariadb_replication_replica_health_info.msg | default('')) }}
+          success: >-
+            {{ (
+              not mariadb_replication_replica_health_status.failed | default(false) | bool
+              and not mariadb_replication_replica_health_info.failed | default(false) | bool
+              and not mariadb_replication_replica_validation_failed | default(false) | bool
+              and not mariadb_replication_replica_configuration_failed | default(false) | bool
+              and (
+                ansible_check_mode | bool
+                or (
+                  mariadb_replication_replica_health_status.Is_Replica
+                  | default(false) | bool
+                  and (
+                    not mariadb_replication_auto_start | bool
+                    or (
+                      mariadb_replication_replica_health_status.get(
+                        'Replica_IO_Running',
+                        mariadb_replication_replica_health_status.get(
+                          'Slave_IO_Running', ''
+                        )
+                      ) | string | lower == 'yes'
+                      and mariadb_replication_replica_health_status.get(
+                        'Replica_SQL_Running',
+                        mariadb_replication_replica_health_status.get(
+                          'Slave_SQL_Running', ''
+                        )
+                      ) | string | lower == 'yes'
+                    )
+                  )
+                )
+              )
+            ) }}

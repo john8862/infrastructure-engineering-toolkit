@@ -1,0 +1,91 @@
+---
+- name: Record the controller virtual-environment root
+  ansible.builtin.set_fact:
+    mariadb_replication_controller_venv_root: >-
+      {{ mariadb_replication_controller_venv_path
+         if mariadb_replication_controller_venv_path | length > 0
+         else (mariadb_replication_controller_python | dirname | dirname) }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  become: false
+  when: mariadb_replication_verify_controller_environment | bool
+
+- name: Check the Ansible controller Python executable
+  ansible.builtin.stat:
+    path: "{{ mariadb_replication_controller_python }}"
+  register: mariadb_replication_controller_python_stat
+  delegate_to: localhost
+  run_once: true
+  become: false
+  when: mariadb_replication_verify_controller_environment | bool
+
+- name: Check for the controller virtual-environment marker
+  ansible.builtin.stat:
+    path: "{{ hostvars['localhost'].mariadb_replication_controller_venv_root }}/pyvenv.cfg"
+  register: mariadb_replication_controller_venv_stat
+  delegate_to: localhost
+  run_once: true
+  become: false
+  when: mariadb_replication_verify_controller_environment | bool
+
+- name: Assemble the controller Python dependency import list
+  ansible.builtin.set_fact:
+    mariadb_replication_controller_python_modules_to_check: >-
+      {{ mariadb_replication_required_controller_python_modules
+         + (['ansiblelint'] if mariadb_replication_check_ansible_lint_dependency | bool else []) }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  become: false
+  when: mariadb_replication_verify_controller_environment | bool
+
+- name: Verify required controller Python dependencies
+  ansible.builtin.command:
+    argv:
+      - "{{ mariadb_replication_controller_python }}"
+      - -c
+      - >-
+        import importlib.util, sys;
+        modules = {{ hostvars['localhost'].mariadb_replication_controller_python_modules_to_check | to_json }};
+        missing = [name for name in modules if importlib.util.find_spec(name) is None];
+        sys.exit("Missing Python modules: " + ", ".join(missing) if missing else 0)
+  register: mariadb_replication_controller_dependency_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  delegate_to: localhost
+  run_once: true
+  become: false
+  when: mariadb_replication_verify_controller_environment | bool
+
+- name: Publish controller preflight result to all role hosts
+  ansible.builtin.set_fact:
+    mariadb_replication_controller_environment_valid: >-
+      {{ (not mariadb_replication_verify_controller_environment | bool)
+         or (
+           mariadb_replication_controller_python_stat.stat.exists | default(false) | bool
+           and mariadb_replication_controller_venv_stat.stat.exists | default(false) | bool
+           and mariadb_replication_controller_dependency_check.rc | default(1) | int == 0
+         ) }}
+    mariadb_replication_controller_environment_failure: >-
+      {{ '' if (
+           not mariadb_replication_verify_controller_environment | bool
+           or (
+             mariadb_replication_controller_python_stat.stat.exists | default(false) | bool
+             and mariadb_replication_controller_venv_stat.stat.exists | default(false) | bool
+             and mariadb_replication_controller_dependency_check.rc | default(1) | int == 0
+           )
+         ) else (
+           'The Ansible controller Python executable, virtual environment marker, '
+           'or required Python imports are missing. Python=' ~
+           mariadb_replication_controller_python ~
+           '; expected pyvenv.cfg under ' ~
+           (hostvars['localhost'].mariadb_replication_controller_venv_root | default('unknown')) ~
+           '; dependency check=' ~
+           (mariadb_replication_controller_dependency_check.stderr | default('not run'))
+         ) }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  become: false

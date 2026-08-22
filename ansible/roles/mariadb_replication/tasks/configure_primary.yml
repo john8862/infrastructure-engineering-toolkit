@@ -1,0 +1,78 @@
+---
+- name: Configure the primary replication account
+  block:
+    - name: Ensure the dedicated replication account has the minimum privilege
+      ansible.mariadb.mariadb_user:
+        name: "{{ mariadb_replication_user }}"
+        host: "{{ mariadb_replication_user_host }}"
+        password: "{{ mariadb_replication_password }}"
+        priv: "{{ mariadb_replication_user_privileges }}"
+        tls_requires: >-
+          {{ (
+               {'X509': None}
+               if mariadb_replication_ssl_require_client_certificate | bool
+               else {'SSL': None}
+             ) if mariadb_replication_ssl_enabled | bool else omit }}
+        state: present
+        update_password: always
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_primary_user_result
+      no_log: true
+
+    - name: Verify the replication privilege after account configuration
+      ansible.mariadb.mariadb_query:
+        query: >-
+          SELECT COUNT(*) AS grant_count
+          FROM information_schema.USER_PRIVILEGES
+          WHERE GRANTEE = %(grantee)s
+            AND PRIVILEGE_TYPE IN ('REPLICATION SLAVE', 'REPLICATION REPLICA')
+        named_args:
+          grantee: "'{{ mariadb_replication_user }}'@'{{ mariadb_replication_user_host }}'"
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_primary_user_grant_check
+      no_log: true
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Validate the required replication privilege
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              mariadb_replication_primary_user_grant_check.query_result
+              | default([[]]) | first | default([]) | first | default({})
+            ).get('grant_count') | int > 0
+        fail_msg: >-
+          The replication account exists but does not have REPLICATION SLAVE
+          or REPLICATION REPLICA on *.*. Check the configured admin privilege
+          and mariadb_replication_user_privileges.
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Publish primary replication-account validation state
+      ansible.builtin.set_fact:
+        mariadb_replication_primary_user_privileges_valid: true
+        mariadb_replication_primary_configuration_success: true
+  rescue:
+    - name: Record primary account configuration failure
+      ansible.builtin.set_fact:
+        mariadb_replication_role_failed: true
+        mariadb_replication_primary_user_privileges_valid: false
+        mariadb_replication_primary_configuration_success: false
+        mariadb_replication_failure_reasons: >-
+          {{ mariadb_replication_failure_reasons | default([])
+             + [ansible_failed_result.msg | default(
+                 'Primary replication account configuration failed.')]
+          }}

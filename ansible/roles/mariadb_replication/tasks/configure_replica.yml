@@ -1,0 +1,240 @@
+---
+- name: Configure one replica idempotently
+  block:
+    - name: Read the current replication channel state
+      ansible.mariadb.mariadb_replication:
+        mode: getreplica
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_current_status
+      changed_when: false
+      check_mode: false
+
+    - name: Normalize current replication status fields
+      ansible.builtin.set_fact:
+        mariadb_replication_current_configured: >-
+          {{ mariadb_replication_current_status.Is_Replica | default(false) | bool }}
+        mariadb_replication_current_master_host: >-
+          {{ mariadb_replication_current_status.get(
+               'Master_Host',
+               mariadb_replication_current_status.get('Source_Host', '')
+             ) | default('') }}
+        mariadb_replication_current_master_port: >-
+          {{ mariadb_replication_current_status.get(
+               'Master_Port',
+               mariadb_replication_current_status.get('Source_Port', 0)
+             ) | default(0) | int }}
+        mariadb_replication_current_master_user: >-
+          {{ mariadb_replication_current_status.get(
+               'Master_User',
+               mariadb_replication_current_status.get('Source_User', '')
+             ) | default('') }}
+        mariadb_replication_current_using_gtid: >-
+          {{ mariadb_replication_current_status.get('Using_Gtid', '') | default('') | string | lower }}
+        mariadb_replication_current_io_running: >-
+          {{ mariadb_replication_current_status.get(
+               'Replica_IO_Running',
+               mariadb_replication_current_status.get('Slave_IO_Running', '')
+             ) | default('') | string | lower }}
+        mariadb_replication_current_sql_running: >-
+          {{ mariadb_replication_current_status.get(
+               'Replica_SQL_Running',
+               mariadb_replication_current_status.get('Slave_SQL_Running', '')
+             ) | default('') | string | lower }}
+        mariadb_replication_current_ssl_allowed: >-
+          {{ mariadb_replication_current_status.get(
+               'Master_SSL_Allowed', 'No'
+             ) | default('No') | string | lower }}
+        mariadb_replication_current_ssl_ca: >-
+          {{ mariadb_replication_current_status.get('Master_SSL_CA_File', '') | default('') }}
+        mariadb_replication_current_ssl_cert: >-
+          {{ mariadb_replication_current_status.get('Master_SSL_Cert', '') | default('') }}
+        mariadb_replication_current_ssl_key: >-
+          {{ mariadb_replication_current_status.get('Master_SSL_Key', '') | default('') }}
+        mariadb_replication_current_ssl_verify: >-
+          {{ mariadb_replication_current_status.get(
+               'Master_SSL_Verify_Server_Cert', 0
+             ) | default(0) | string | lower }}
+
+    - name: Determine whether the channel needs a connection reconfiguration
+      ansible.builtin.set_fact:
+        mariadb_replication_channel_needs_reconfigure: >-
+          {{ mariadb_replication_force_reconfigure | bool
+             or not mariadb_replication_current_configured | bool
+             or mariadb_replication_current_master_host != mariadb_replication_primary_host
+             or mariadb_replication_current_master_port | int != mariadb_replication_port | int
+             or mariadb_replication_current_master_user != mariadb_replication_user
+             or (
+               mariadb_replication_mode == 'gtid'
+               and mariadb_replication_current_using_gtid not in ['slave_pos', 'replica_pos', 'current_pos']
+             )
+             or (
+               mariadb_replication_mode == 'position'
+               and mariadb_replication_current_using_gtid not in ['', 'no', 'none', 'disabled']
+             )
+             or (
+               mariadb_replication_ssl_enabled | bool
+               and mariadb_replication_current_ssl_allowed not in ['yes', 'on', '1']
+             )
+             or (
+               not mariadb_replication_ssl_enabled | bool
+               and mariadb_replication_current_ssl_allowed in ['yes', 'on', '1']
+             )
+             or (
+               mariadb_replication_ssl_enabled | bool
+               and mariadb_replication_current_ssl_ca != mariadb_replication_ssl_ca
+             )
+             or (
+               mariadb_replication_ssl_enabled | bool
+               and mariadb_replication_current_ssl_cert != mariadb_replication_ssl_client_certificate
+             )
+             or (
+               mariadb_replication_ssl_enabled | bool
+               and mariadb_replication_current_ssl_key != mariadb_replication_ssl_client_key
+             )
+             or (
+               mariadb_replication_ssl_enabled | bool
+               and (
+                 mariadb_replication_current_ssl_verify in ['yes', 'on', '1']
+                 ) != mariadb_replication_ssl_verify_server_cert | bool
+             ) }}
+
+    - name: Stop an active replica before changing its channel
+      ansible.mariadb.mariadb_replication:
+        mode: stopreplica
+        fail_on_error: true
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      when:
+        - not ansible_check_mode
+        - mariadb_replication_channel_needs_reconfigure | bool
+        - mariadb_replication_current_configured | bool
+        - mariadb_replication_current_io_running == 'yes'
+          or mariadb_replication_current_sql_running == 'yes'
+
+    - name: Configure the replica connection with the official MariaDB module
+      ansible.mariadb.mariadb_replication:
+        mode: changeprimary
+        primary_host: "{{ mariadb_replication_primary_host }}"
+        primary_user: "{{ mariadb_replication_user }}"
+        primary_password: "{{ mariadb_replication_password }}"
+        primary_port: "{{ mariadb_replication_port }}"
+        primary_connect_retry: "{{ mariadb_replication_connect_retry }}"
+        primary_use_gtid: >-
+          {{ mariadb_replication_gtid_use
+             if mariadb_replication_mode == 'gtid' else 'disabled' }}
+        primary_log_file: >-
+          {{ mariadb_replication_effective_log_file
+             if mariadb_replication_mode == 'position' else omit }}
+        primary_log_pos: >-
+          {{ mariadb_replication_effective_log_pos
+             if mariadb_replication_mode == 'position' else omit }}
+        primary_ssl: "{{ mariadb_replication_ssl_enabled }}"
+        primary_ssl_ca: >-
+          {{ mariadb_replication_ssl_ca
+             if mariadb_replication_ssl_enabled else omit }}
+        primary_ssl_cert: >-
+          {{ mariadb_replication_ssl_client_certificate
+             if mariadb_replication_ssl_enabled
+             and mariadb_replication_ssl_client_certificate | length > 0
+             else omit }}
+        primary_ssl_key: >-
+          {{ mariadb_replication_ssl_client_key
+             if mariadb_replication_ssl_enabled
+             and mariadb_replication_ssl_client_key | length > 0
+             else omit }}
+        primary_ssl_verify_server_cert: >-
+          {{ mariadb_replication_ssl_verify_server_cert
+             if mariadb_replication_ssl_enabled else omit }}
+        fail_on_error: true
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      no_log: true
+      when:
+        - not ansible_check_mode
+        - mariadb_replication_channel_needs_reconfigure | bool
+
+    - name: Start the replica when auto_start is enabled
+      ansible.mariadb.mariadb_replication:
+        mode: startreplica
+        fail_on_error: true
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      when:
+        - not ansible_check_mode
+        - mariadb_replication_auto_start | bool
+        - mariadb_replication_channel_needs_reconfigure | bool
+          or not (
+            mariadb_replication_current_io_running == 'yes'
+            and mariadb_replication_current_sql_running == 'yes'
+          )
+
+    - name: Stop the replica when auto_start is disabled
+      ansible.mariadb.mariadb_replication:
+        mode: stopreplica
+        fail_on_error: true
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      when:
+        - not ansible_check_mode
+        - not mariadb_replication_auto_start | bool
+        - mariadb_replication_current_configured | bool
+        - mariadb_replication_current_io_running == 'yes'
+          or mariadb_replication_current_sql_running == 'yes'
+
+    - name: Enforce the desired replica read_only state after configuration
+      ansible.mariadb.mariadb_variables:
+        variable: read_only
+        value: >-
+          {{ (
+             mariadb_replication_read_only_value
+             if mariadb_replication_replica_read_only | bool else
+             ('OFF' if mariadb_replication_server_version.major | int >= 12 else '0')
+          ) }}
+        mode: global
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      when: not ansible_check_mode
+
+    - name: Mark replica configuration complete
+      ansible.builtin.set_fact:
+        mariadb_replication_configuration_success: true
+        mariadb_replication_configuration_planned: "{{ ansible_check_mode | bool }}"
+  rescue:
+    - name: Record replica configuration failure and continue other replicas
+      ansible.builtin.set_fact:
+        mariadb_replication_replica_configuration_failed: true
+        mariadb_replication_configuration_success: false
+        mariadb_replication_configuration_failure: >-
+          {{ ansible_failed_result.msg | default(
+               'Replica configuration failed; inspect the preceding task output.') }}

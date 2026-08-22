@@ -1,0 +1,29 @@
+---
+- name: Validate optional package-install inputs
+  ansible.builtin.assert:
+    that:
+      - mariadb_replication_packages | length > 0
+    fail_msg: >-
+      mariadb_replication_manage_packages is true, but
+      mariadb_replication_packages is empty. Supply the exact packages for
+      the target distribution; this role does not select repositories.
+    quiet: true
+  when: mariadb_replication_manage_packages | bool
+
+- name: Install requested MariaDB replication packages
+  ansible.builtin.package:
+    name: "{{ mariadb_replication_packages }}"
+    state: "{{ mariadb_replication_package_state }}"
+  when: mariadb_replication_manage_packages | bool
+  tags:
+    - install
+
+- name: Ensure MariaDB service is available after optional installation
+  ansible.builtin.service:
+    name: "{{ mariadb_replication_service_name }}"
+    state: "{{ mariadb_replication_service_state }}"
+  when:
+    - mariadb_replication_manage_packages | bool
+    - mariadb_replication_manage_service | bool
+  tags:
+    - install

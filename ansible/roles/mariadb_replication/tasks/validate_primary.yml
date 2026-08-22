@@ -1,0 +1,232 @@
+---
+- name: Validate the primary MariaDB runtime and prerequisites
+  block:
+    - name: Gather minimum managed-primary facts for dependency checks
+      ansible.builtin.setup:
+        gather_subset:
+          - min
+
+    - name: Verify required Python modules on the managed primary
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_facts.python.executable | default(ansible_python_interpreter | default('python3')) }}"
+          - -c
+          - >-
+            import importlib.util, sys;
+            modules = {{ mariadb_replication_remote_python_modules | to_json }};
+            missing = [name for name in modules if importlib.util.find_spec(name) is None];
+            sys.exit("Missing Python modules: " + ", ".join(missing) if missing else 0)
+      register: mariadb_replication_primary_dependency_check
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Fail primary validation when managed-node dependencies are missing
+      ansible.builtin.assert:
+        that:
+          - mariadb_replication_primary_dependency_check.rc | int == 0
+        fail_msg: >-
+          The managed primary is missing a required Python dependency for the
+          MariaDB Ansible modules. Install the modules listed in
+          mariadb_replication_remote_python_modules on the managed node.
+        quiet: true
+
+    - name: Collect primary MariaDB version, settings, status, and replica hosts
+      ansible.mariadb.mariadb_info:
+        filter:
+          - version
+          - settings
+          - master_status
+          - slave_status
+          - slave_hosts
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_info
+      check_mode: false
+
+    - name: Store primary version-aware facts
+      ansible.builtin.set_fact:
+        mariadb_replication_server_version: "{{ mariadb_replication_info.version }}"
+        mariadb_replication_server_settings: "{{ mariadb_replication_info.settings }}"
+        mariadb_replication_read_only_value: >-
+          {{ 'ON' if mariadb_replication_info.version.major | int >= 12 else '1' }}
+
+    - name: Validate the supported primary version and binary-log prerequisites
+      ansible.builtin.assert:
+        that:
+          - mariadb_replication_info.server_engine | default('') | lower == 'mariadb'
+          - mariadb_replication_info.version.suffix | default('') | lower is search('mariadb')
+          - mariadb_replication_info.version.major | int in [11, 12]
+          - (mariadb_replication_info.settings.log_bin | default('OFF') | string | lower) in ['on', '1', 'yes']
+          - mariadb_replication_info.settings.server_id is defined
+          - mariadb_replication_info.settings.server_id | int >= 1
+          - mariadb_replication_info.settings.server_id | int <= 4294967295
+          - (mariadb_replication_info.settings.binlog_format | default('') | string | upper) in ['ROW', 'STATEMENT', 'MIXED']
+          - >-
+            mariadb_replication_mode != 'gtid'
+            or mariadb_replication_info.settings.gtid_domain_id is defined
+          - >-
+            mariadb_replication_mode != 'gtid'
+            or mariadb_replication_info.settings.gtid_binlog_pos is defined
+          - >-
+            mariadb_replication_mode != 'gtid'
+            or mariadb_replication_info.settings.gtid_strict_mode is defined
+          - >-
+            mariadb_replication_mode != 'gtid'
+            or not mariadb_replication_require_gtid_strict_mode | bool
+            or (mariadb_replication_info.settings.gtid_strict_mode | string | lower) in ['on', '1', 'yes']
+          - >-
+            not mariadb_replication_require_log_basename | bool
+            or mariadb_replication_info.settings.log_bin_basename
+               | default('') | string | length > 0
+        fail_msg: >-
+          The initial primary must be MariaDB 11.x or 12.x with binary
+          logging, a valid unique-range server_id, GTID variables available,
+          and a stable binary-log basename. The role does not edit these
+          settings.
+        quiet: true
+
+    - name: Validate primary writability and network reachability settings
+      ansible.builtin.assert:
+        that:
+          - (mariadb_replication_info.settings.read_only | default('OFF') | string | lower) in ['off', '0', 'no']
+          - >-
+            not mariadb_replication_validate_network | bool
+            or (mariadb_replication_info.settings.skip_networking | default('OFF') | string | lower) not in ['on', '1', 'yes']
+          - >-
+            not mariadb_replication_validate_network | bool
+            or mariadb_replication_allow_loopback_bind | bool
+            or (mariadb_replication_info.settings.bind_address | default('') | string | lower)
+               not in ['127.0.0.1', '::1', 'localhost']
+        fail_msg: >-
+          The initial primary must remain writable and reachable by TCP. Set
+          read_only=OFF, disable skip-networking, and bind MariaDB to a
+          reachable address outside this role before retrying.
+        quiet: true
+
+    - name: Read the primary binary-log inventory for position mode
+      ansible.mariadb.mariadb_query:
+        query: SHOW BINARY LOGS
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_primary_binary_logs
+      check_mode: false
+      when: mariadb_replication_mode == 'position'
+
+    - name: Build the position coordinates to validate on the primary
+      ansible.builtin.set_fact:
+        mariadb_replication_primary_coordinate_records: []
+      when: mariadb_replication_mode == 'position'
+
+    - name: Resolve every replica's requested primary coordinate
+      ansible.builtin.set_fact:
+        mariadb_replication_primary_coordinate_records: >-
+          {{ mariadb_replication_primary_coordinate_records + [
+            {
+              'host': item,
+              'file': mariadb_replication_log_coordinates.get(item, {}).get(
+                'file', mariadb_replication_primary_log_file
+              ),
+              'position': mariadb_replication_log_coordinates.get(item, {}).get(
+                'position', mariadb_replication_primary_log_pos
+              )
+            }
+          ] }}
+      loop: "{{ mariadb_replication_replica_hosts }}"
+      loop_control:
+        label: "{{ item }}"
+      when: mariadb_replication_mode == 'position'
+
+    - name: Validate requested file/position coordinates against primary logs
+      ansible.builtin.assert:
+        that:
+          - item.file in (
+              mariadb_replication_primary_binary_logs.query_result
+              | default([[]]) | first | default([])
+              | map(attribute='Log_name') | list
+            )
+          - item.position | int >= 4
+          - >-
+            item.position | int <= (
+              mariadb_replication_primary_binary_logs.query_result
+              | default([[]]) | first | default([])
+              | selectattr('Log_name', 'equalto', item.file)
+              | map(attribute='File_size') | first | default(0) | int
+            )
+        fail_msg: >-
+          The requested position coordinate for {{ item.host }} is not
+          present in the primary binary-log inventory or is outside the log
+          file range. Re-capture the coordinate for the consistent copy.
+        quiet: true
+      loop: "{{ mariadb_replication_primary_coordinate_records | default([]) }}"
+      loop_control:
+        label: "{{ item.host }}"
+      when: mariadb_replication_mode == 'position'
+
+    - name: Validate primary TLS capability when replication TLS is enabled
+      ansible.builtin.assert:
+        that:
+          - (mariadb_replication_info.settings.have_ssl | default('NO') | string | lower) in ['yes', 'on', '1']
+        fail_msg: >-
+          mariadb_replication_ssl_enabled is true, but the primary does not
+          report TLS support through have_ssl. Configure the existing MariaDB
+          server certificate/key outside this role.
+        quiet: true
+      when: mariadb_replication_ssl_enabled | bool
+
+    - name: Verify the administrative account can inspect its grants
+      ansible.mariadb.mariadb_query:
+        query: SHOW GRANTS
+        login_user: "{{ mariadb_replication_admin_login_user | default(omit, true) }}"
+        login_password: "{{ mariadb_replication_admin_login_password | default(omit, true) }}"
+        login_host: "{{ mariadb_replication_admin_login_host }}"
+        login_port: "{{ mariadb_replication_admin_login_port }}"
+        login_unix_socket: "{{ mariadb_replication_admin_unix_socket | default(omit, true) }}"
+        config_file: "{{ mariadb_replication_admin_config_file | default(omit, true) }}"
+        connect_timeout: "{{ mariadb_replication_connect_timeout }}"
+      register: mariadb_replication_primary_admin_grants
+      no_log: true
+      check_mode: false
+
+    - name: Validate that administrative grant inspection returned data
+      ansible.builtin.assert:
+        that:
+          - mariadb_replication_primary_admin_grants.query_result | default([]) | length > 0
+        fail_msg: >-
+          The configured MariaDB administrative account could not return its
+          grants. Use an account with sufficient privileges to create the
+          replication user and configure replication.
+        quiet: true
+
+    - name: Collect the primary table catalog for consistency validation
+      ansible.builtin.import_tasks: consistency_primary.yml
+
+    - name: Mark primary validation successful
+      ansible.builtin.set_fact:
+        mariadb_replication_primary_validation_success: true
+  rescue:
+    - name: Record primary validation failure without hiding it from the summary
+      ansible.builtin.set_fact:
+        mariadb_replication_role_failed: true
+        mariadb_replication_failure_reasons: >-
+          {{ mariadb_replication_failure_reasons | default([])
+             + [(
+                 ansible_failed_result.results | default([])
+                 | selectattr('failed', 'equalto', true)
+                 | map(attribute='msg') | list | join('; ')
+               ) or (
+                 ansible_failed_result.msg | default(
+                   'Primary validation failed; inspect the preceding task output.')
+               )]
+          }}
+        mariadb_replication_primary_validation_success: false
