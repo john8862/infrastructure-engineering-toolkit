@@ -340,7 +340,7 @@ ansible/roles/                          Independent Ansible roles
 examples/                               Public-safe inventories and localhost fixtures
 tests/                                  Contract, syntax, and static checks
 docs/                                   Architecture, operations, CI, release, and articles
-.github/workflows/ci.yml               Read-only quality gates
+.github/workflows/ci.yml               Read-only quality gates on develop/main
 .github/workflows/release-please.yml   Main-branch release preparation/publication
 ansible/requirements.yml               Pinned Ansible collections
 requirements-ci.txt                    Pinned Python validation tools
@@ -355,8 +355,10 @@ adopting an unrelated role. Collections are installed into an ignored path rathe
 
 ## Validation and CI
 
-The [quality-gates workflow](.github/workflows/ci.yml) runs on pull requests and pushes to `main` with read-only
-permissions. It does not connect to live infrastructure or require deployment credentials.
+The [quality-gates workflow](.github/workflows/ci.yml) runs on pull requests targeting `develop` or `main`, and on
+pushes to both branches, with read-only permissions. Normal changes are integrated through `develop`; a reviewed
+`develop` to `main` pull request is used for release promotion. It does not connect to live infrastructure or require
+deployment credentials.
 
 | Gate | What it covers | Local entry point |
 | --- | --- | --- |
@@ -443,8 +445,28 @@ management, PKI enrolment, backup/restore orchestration, hidden DNS writes, or r
 
 ## Contributing
 
-Contributions are welcome when they improve reliability, clarity, or reproducibility while preserving component
-boundaries. Before opening a pull request:
+🤝 Contributions are welcome when they improve reliability, clarity, or reproducibility while preserving component
+boundaries. Normal development starts from the latest `develop` branch:
+
+```bash
+git fetch origin develop
+git switch develop
+git pull --ff-only origin develop
+git switch -c feature/focused-scope-short-description
+```
+
+Use `feature/`, `fix/`, `docs/`, `ci/`, `test/`, `refactor/`, or `chore/` and the form
+`<prefix>/<focused-scope>-<short-description>`. Existing branches with a simple scope remain understandable and
+compatible. Open the pull request against `develop` by default. A reviewed `develop` to `main` pull request is for
+integration and release promotion; an emergency hotfix targeting `main` must state why the normal path cannot be used
+and should be followed by an equivalent update to `develop`.
+
+A contribution that follows this branch model, uses Conventional Commits, keeps a focused public-safe diff, documents
+validation, and passes all Quality Gates is prioritised for review and integration. Priority is not automatic
+acceptance: technical, security, compatibility, and maintainer review still apply. See [`CONTRIBUTING.md`](CONTRIBUTING.md)
+for the complete workflow.
+
+Before opening a pull request:
 
 1. Keep the change focused and public-safe.
 2. Use RFC documentation values and `*.example` placeholders in examples.

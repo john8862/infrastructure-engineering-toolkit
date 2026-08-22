@@ -1,17 +1,30 @@
 # Continuous integration
 
 The repository's quality-gates workflow is deliberately read-only. It runs on
-pull requests and pushes to `main` with `contents: read`, cancels superseded
-runs, and does not connect to or change live infrastructure. No credentials or
-deployment secrets are required.
+pull requests targeting `develop` or `main`, and on pushes to `develop` or
+`main`, with `contents: read`. It cancels superseded runs and does not connect
+to or change live infrastructure. No credentials or deployment secrets are
+required.
 
-## Merge order
+## Branch flow
 
-The `ci/quality-gates` branch is the final integration change. Merge the public
-component branches first, then merge this branch after the final union contains
-the paths checked by `scripts/ci/require-final-union.sh`. That guard fails with
-a clear list when a topic branch is evaluated before the component branches;
-this prevents a partial repository from being reported as a complete build.
+`develop` is the normal integration branch. Start a focused topic branch from
+the latest `develop`, open its pull request against `develop`, and wait for all
+four quality-gate jobs to pass. The `scripts/ci/require-final-union.sh` guard
+keeps the public component union complete, so a partial topic branch is not
+reported as a complete build.
+
+After the integrated change set has been reviewed and is ready for promotion,
+open a separate `develop` to `main` pull request. The `main` workflow run is
+the release-promotion validation; Release Please remains restricted to pushes
+on `main` and does not publish from `develop`.
+
+The preferred branch naming model is documented in
+[`CONTRIBUTING.md`](../CONTRIBUTING.md). A branch that follows that model and
+provides a focused public-safe diff, Conventional Commit history, relevant
+validation, and four green quality gates is prioritised for review and
+integration. This priority does not bypass technical, security, compatibility,
+or maintainer review.
 
 ## Checks
 
