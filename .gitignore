@@ -1,0 +1,115 @@
+# Operating-system metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+
+# Editors and local tooling
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+
+# Environment files: allow only explicitly named examples
+.env
+.env.*
+*.env
+!.env.example
+!.env.*.example
+!*.env.example
+
+# Secrets, credentials, and local configuration
+.secrets/
+secrets/
+secret/
+credentials/
+*.secret
+*.secrets
+*.credential
+*.credentials
+*.password
+*.token
+*.access
+config.local.*
+
+# Certificates, private keys, keytabs, and keystores
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.keytab
+*.kdb
+*.csr
+
+# Vault material
+.vault/
+.vault-*
+vault/
+vault.*
+*.vault
+*.vault.yml
+*.vault.yaml
+*.vault.json
+
+# Logs, runtime state, and temporary files
+*.log
+*.out
+*.pid
+*.pid.lock
+*.sock
+log/
+logs/
+run/
+runtime/
+tmp/
+temp/
+
+# Generated, build, test, and report output
+generated/
+build/
+dist/
+artifacts/
+output/
+reports/
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+
+# Language and package-manager caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+
+# Infrastructure-tool state and crash output
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Vendored dependency collections
+vendor/
+collections/
+ansible_collections/
