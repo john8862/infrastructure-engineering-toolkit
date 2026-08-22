@@ -14,7 +14,6 @@ TECHNITIUM_PREVIOUS_SOURCE_RULES=()
 firewall_webmin_required() {
     [[ "${DNS_BACKEND:-}" == bind9_webmin ]]
 }
-
 firewall_discover_active_zones() {
     FIREWALL_ZONES=()
     [[ "${FIREWALL_STATE:-}" == active ]] || return 0
@@ -778,4 +777,3 @@ firewall_configure() {
         firewall_configure_firewalld
     fi
 }
-

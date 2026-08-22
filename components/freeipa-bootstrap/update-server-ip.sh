@@ -1006,4 +1006,3 @@ state_mark_resource "dns-ip-update-${IPA_HOSTNAME}" modified-by-bootstrap
 UPDATE_CHANGED=true
 print_update_summary
 printf 'IP-only DNS update completed. Update the operating-system network configuration separately, keep the hostname unchanged, then run ./install.sh --check and the documented FreeIPA/Kerberos health checks.\n'
-

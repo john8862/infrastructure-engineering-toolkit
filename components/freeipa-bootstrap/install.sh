@@ -392,4 +392,3 @@ freeipa_configure_directory_defaults
 freeipa_configure_server_mkhomedir
 run_full_validation
 print_installation_summary installed
-

@@ -12,7 +12,6 @@ validation_check() {
         log_error "validation failed: $label"
     fi
 }
-
 validate_freeipa_services() {
     command_exists ipactl || return 1
     ipactl status >/dev/null 2>&1
@@ -190,4 +189,3 @@ print_installation_summary() {
     fi
     printf '\n'
 }
-

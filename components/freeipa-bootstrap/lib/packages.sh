@@ -5,7 +5,6 @@ package_is_installed() {
     command_exists rpm || return 127
     rpm -q "$package" >/dev/null 2>&1
 }
-
 package_install() {
     local package
     local -a requested=()
@@ -36,4 +35,3 @@ package_install() {
     run_command "${command[@]}" || return $?
     log_info "installed package set: ${missing[*]}"
 }
-

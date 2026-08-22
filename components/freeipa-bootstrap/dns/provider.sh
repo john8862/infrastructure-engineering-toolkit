@@ -13,7 +13,6 @@ dns_reverse_zone_list() {
         printf '%s\n' "${IPA_REVERSE_ZONE%.}"
     fi
 }
-
 dns_zone_for_ipv4() {
     local address=${1:-}
     local candidate calculated
@@ -307,4 +306,3 @@ dns_integrated_reverse_zone_configure() {
     state_set INTEGRATED_REVERSE_ZONE "$reverse_zone"
     state_mark_resource "dns-zone-$reverse_zone" created-by-bootstrap
 }
-

@@ -24,7 +24,6 @@ configure_requested_hostname() {
     state_mark_resource hostname modified-by-bootstrap
     log_info "hostname configured as $IPA_HOSTNAME"
 }
-
 validate_existing_hostname() {
     local current
     current=$(hostname --fqdn 2>/dev/null || hostname 2>/dev/null || true)
@@ -33,4 +32,3 @@ validate_existing_hostname() {
         return 1
     }
 }
-

@@ -15,7 +15,6 @@ DNS_EXPECTED_RECORDS=()
 is_dry_run() {
     [[ "${MODE:-install}" == "dry-run" ]]
 }
-
 is_check() {
     [[ "${MODE:-install}" == "check" ]]
 }
@@ -314,4 +313,3 @@ run_with_log() {
     shift
     RUN_COMMAND_EXTRA_LOG_FILE=$output_file run_command "$@"
 }
-

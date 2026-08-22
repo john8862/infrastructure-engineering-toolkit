@@ -32,7 +32,6 @@ DNS_NODES=()
 topology_primary_server() {
     printf '%s' "${DNS_PRIMARY_SERVER:-${IPA_HOSTNAME}}"
 }
-
 topology_primary_ip() {
     printf '%s' "${DNS_PRIMARY_IP:-${IPA_IP_ADDRESS}}"
 }
@@ -229,4 +228,3 @@ topology_validate_configuration() {
         validate_ipv4 "$WEBMIN_PEER_IP" || preflight_error "WEBMIN_PEER_IP must be a valid IPv4 address"
     fi
 }
-

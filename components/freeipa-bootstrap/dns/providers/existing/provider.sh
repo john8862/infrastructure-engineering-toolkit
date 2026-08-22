@@ -19,7 +19,6 @@ dns_provider_check() {
     state_set EXTERNAL_DNS_PREREQUISITES_FILE "$plan_file"
     log_info "generated external DNS prerequisite plan: $plan_file"
 }
-
 dns_provider_install() {
     log_info "existing DNS provider selected; no DNS packages or external DNS changes will be made"
 }
@@ -110,4 +109,3 @@ dns_provider_sync_freeipa_records() {
 dns_provider_uninstall() {
     log_warn "existing DNS provider uninstall is a guarded no-op; this bootstrap never modifies or removes external DNS"
 }
-

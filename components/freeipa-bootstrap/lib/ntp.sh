@@ -12,7 +12,6 @@ ntp_expected_config_block() {
     done
     printf '%s\n' "$NTP_MANAGED_END"
 }
-
 ntp_configure() {
     log_stage ntp
     if [[ -z "$NTP_SERVERS" ]]; then
@@ -95,4 +94,3 @@ ntp_validate() {
     log_error "time synchronization is not healthy; inspect chronyc tracking or timedatectl"
     return 1
 }
-

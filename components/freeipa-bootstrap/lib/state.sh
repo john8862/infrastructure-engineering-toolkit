@@ -21,7 +21,6 @@ acquire_install_lock() {
     printf '%s\n' "$$" >&"$LOCK_FD"
     log_info "acquired bootstrap execution lock: $IPA_LOCK_FILE"
 }
-
 release_install_lock() {
     if [[ -n "${LOCK_FD:-}" ]]; then
         flock -u "$LOCK_FD" 2>/dev/null || true
@@ -145,4 +144,3 @@ state_mark_resource() {
     local normalized=${resource//[^A-Za-z0-9_]/_}
     state_set "RESOURCE_${normalized}" "$status"
 }
-

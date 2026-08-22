@@ -23,7 +23,6 @@ freeipa_detect_state() {
     fi
     log_info "FreeIPA discovery: $FREEIPA_STATE"
 }
-
 freeipa_prepare_credentials() {
     if ! is_install; then
         return 0
@@ -764,4 +763,3 @@ freeipa_configure_server_mkhomedir() {
     run_command systemctl enable --now oddjobd
     state_set SERVER_MKHOMEDIR_CONFIGURED true
 }
-

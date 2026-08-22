@@ -23,7 +23,6 @@ supported_os_identity() {
     [[ "$major" == 8 || "$major" == 9 || "$major" == 10 ]] || return 1
     [[ "$arch" == x86_64 || "$arch" == aarch64 ]]
 }
-
 preflight_reset() {
     PREFLIGHT_ERRORS=()
     PREFLIGHT_WARNINGS=()
@@ -464,4 +463,3 @@ preflight_runtime() {
     validate_runtime_dns
     validate_replica_source_reachability
 }
-
