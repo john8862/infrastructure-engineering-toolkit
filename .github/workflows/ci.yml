@@ -1,0 +1,181 @@
+name: Quality gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gates-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  shell:
+    name: Shell syntax and FreeIPA contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require final public component union
+        run: ./scripts/ci/require-final-union.sh
+
+      - name: Check shell syntax
+        shell: bash
+        run: |
+          mapfile -t shell_files < <(
+            find components scripts tests -type f \
+              \( -name '*.sh' -o -name '*.bash' \) -print | sort
+          )
+          if ((${#shell_files[@]} == 0)); then
+            echo "No shell files were found" >&2
+            exit 1
+          fi
+          for shell_file in "${shell_files[@]}"; do
+            bash -n "$shell_file"
+          done
+
+      - name: Run FreeIPA contract tests
+        run: bash tests/freeipa-bootstrap/test.sh
+
+  python-contracts:
+    name: Python contract tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.13"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Require final public component union
+        run: ./scripts/ci/require-final-union.sh
+
+      - name: Run dependency-free contract tests
+        run: |
+          python tests/dns_update/test_contract.py
+          python tests/mariadb/test_contract.py
+          python tests/mariadb_replication/test_contract.py
+
+  ansible:
+    name: Ansible lint, YAML, and fixture syntax
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned validation tools
+        run: python -m pip install --requirement requirements-ci.txt
+
+      - name: Install pinned Ansible collections outside the checkout
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/ansible-collections
+        run: |
+          mkdir -p "$ANSIBLE_COLLECTIONS_PATH"
+          ansible-galaxy collection install \
+            --requirements-file ansible/requirements.yml \
+            --collections-path "$ANSIBLE_COLLECTIONS_PATH"
+
+      - name: Require final public component union
+        run: ./scripts/ci/require-final-union.sh
+
+      - name: Lint Ansible roles
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/ansible-collections
+          ANSIBLE_LOCAL_TEMP: ${{ runner.temp }}/ansible-tmp
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
+        run: |
+          mkdir -p "$ANSIBLE_LOCAL_TEMP"
+          ansible-lint --offline --profile basic ansible/roles
+
+      - name: Lint YAML
+        run: yamllint --strict --config-file .yamllint .github ansible examples tests
+
+      - name: Syntax-check DNS and database fixtures
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/ansible-collections
+          ANSIBLE_LOCAL_TEMP: ${{ runner.temp }}/ansible-tmp
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
+        run: |
+          mkdir -p "$ANSIBLE_LOCAL_TEMP"
+          ansible-playbook --syntax-check \
+            -i localhost, -c local examples/dns-update/site.yml
+          ansible-playbook --syntax-check \
+            -i examples/mariadb/inventory.example.yml \
+            examples/mariadb/site.yml
+          ansible-playbook --syntax-check \
+            -i examples/mariadb-replication/inventory.yml \
+            examples/mariadb-replication/playbook.yml
+
+      - name: Run MaxScale static and Keepalived syntax fixtures
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/ansible-collections
+          ANSIBLE_LOCAL_TEMP: ${{ runner.temp }}/ansible-tmp
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
+        run: |
+          mkdir -p "$ANSIBLE_LOCAL_TEMP"
+          bash tests/maxscale/test_static.sh
+          sh tests/keepalived/test_syntax.sh
+
+  documentation-and-whitespace:
+    name: Markdown and Git hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: Install Markdown linter
+        run: python -m pip install --requirement requirements-ci.txt
+
+      - name: Require final public component union
+        run: ./scripts/ci/require-final-union.sh
+
+      - name: Lint Markdown
+        run: pymarkdown --config .pymarkdown.json scan --recurse --respect-gitignore .
+
+      - name: Check Git whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "${BASE_SHA:-}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git diff --check "${BASE_SHA}...HEAD"
+          else
+            git diff-tree --check --no-commit-id -r HEAD
+          fi
