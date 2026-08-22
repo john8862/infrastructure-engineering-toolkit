@@ -1,0 +1,115 @@
+---
+- name: Normalize the DNS authentication interface
+  ansible.builtin.set_fact:
+    dns_update_auth_mode_effective: >-
+      {{ 'insecure' if dns_update_auth_mode | lower == 'none'
+         else dns_update_auth_mode | lower }}
+    dns_update_key_algorithm_effective: >-
+      {{ 'HMAC-MD5.SIG-ALG.REG.INT'
+         if dns_update_key_algorithm | lower == 'hmac-md5.sig-alg.reg.int'
+         else dns_update_key_algorithm | lower }}
+  when: dns_update_enabled | bool
+  no_log: true
+  tags:
+    - always
+    - dns_update
+    - dns_update_validation
+
+- name: Validate the generic DNS update interface
+  ansible.builtin.assert:
+    that:
+      - dns_update_records is sequence
+      - dns_update_records is not string
+      - dns_update_auth_mode_effective in ['gss-tsig', 'tsig', 'insecure']
+      - dns_update_protocol | lower in ['tcp', 'udp']
+      - dns_update_port | int > 0
+      - dns_update_port | int <= 65535
+      - dns_update_timeout | float > 0
+      - dns_update_ttl | int >= 0
+      - dns_update_conflict_policy | lower in ['report', 'replace']
+      - not dns_update_manage | bool or dns_update_records | length > 0
+      - not (dns_update_manage | bool
+             and dns_update_manage_runtime_dependencies | bool)
+        or dns_update_runtime_packages | length > 0
+      - dns_update_auth_mode_effective != 'insecure'
+        or not dns_update_manage | bool
+        or dns_update_allow_insecure | bool
+      - not dns_update_manage | bool
+        or dns_update_auth_mode_effective == 'insecure'
+        or (dns_update_auth_mode_effective == 'gss-tsig'
+            and dns_update_kerberos_principal | string | trim | length > 0
+            and dns_update_kerberos_password | string | length > 0)
+        or (dns_update_auth_mode_effective == 'tsig'
+            and dns_update_key_name | string | trim | length > 0
+            and dns_update_key_secret | string | length > 0
+            and dns_update_key_algorithm | lower in [
+              'hmac-md5.sig-alg.reg.int',
+              'hmac-md5',
+              'hmac-sha1',
+              'hmac-sha224',
+              'hmac-sha256',
+              'hmac-sha384',
+              'hmac-sha512'
+            ])
+    fail_msg: >-
+      DNS update inputs are incomplete. Management requires an explicit
+      server (global or per record) and one of gss-tsig or tsig with runtime
+      credentials.
+      Insecure mode is test-only and also requires
+      dns_update_allow_insecure=true. Every record must declare its own zone;
+      reverse-zone discovery is not performed. When dependency management is
+      enabled, provide target package names for dnspython and, for GSS-TSIG,
+      gssapi.
+  when: dns_update_enabled | bool
+  no_log: true
+  tags:
+    - always
+    - dns_update
+    - dns_update_validation
+
+- name: Install target-side dependencies for community.general.nsupdate
+  ansible.builtin.package:
+    name: "{{ dns_update_runtime_packages }}"
+    state: present
+  when:
+    - dns_update_enabled | bool
+    - dns_update_manage | bool
+    - dns_update_manage_runtime_dependencies | bool
+    - dns_update_runtime_packages | length > 0
+  tags:
+    - dns_update
+    - dns_update_dependencies
+
+- name: Resolve the DNS update coordinator
+  ansible.builtin.set_fact:
+    dns_update_coordinator_effective: >-
+      {{ dns_update_coordinator
+         if dns_update_coordinator | string | trim | length > 0
+         else inventory_hostname }}
+  when: dns_update_enabled | bool
+  tags:
+    - always
+    - dns_update
+
+- name: Report DNS update role disabled
+  ansible.builtin.debug:
+    msg: DNS reconciliation is disabled; no records were queried or changed.
+  when: not dns_update_enabled | bool
+  tags:
+    - always
+    - dns_update
+
+- name: Reconcile each explicitly declared DNS record independently
+  ansible.builtin.include_tasks: reconcile_record.yml
+  loop: "{{ dns_update_records }}"
+  loop_control:
+    loop_var: dns_update_record
+    label: >-
+      {{ dns_update_record.name | default('unnamed') }}
+      {{ dns_update_record.type | default('A') }}
+  when:
+    - dns_update_enabled | bool
+    - inventory_hostname == dns_update_coordinator_effective
+  tags:
+    - dns_update
+    - dns_update_record

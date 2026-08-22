@@ -1,0 +1,2 @@
+---
+# DNS updates are transaction-like and do not need a service handler.

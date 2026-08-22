@@ -1,0 +1,133 @@
+---
+argument_specs:
+  main:
+    short_description: Reconcile explicitly declared A and PTR DNS records.
+    options:
+      dns_update_enabled:
+        type: bool
+        default: false
+      dns_update_manage:
+        type: bool
+        default: false
+      dns_update_manage_runtime_dependencies:
+        type: bool
+        default: false
+      dns_update_runtime_packages:
+        type: list
+        elements: str
+        default: []
+      dns_update_records:
+        type: list
+        elements: dict
+        default: []
+        options:
+          name:
+            type: str
+            required: true
+          type:
+            type: str
+            choices:
+              - A
+              - PTR
+              - a
+              - ptr
+            default: A
+          value:
+            type: raw
+          state:
+            type: str
+            choices:
+              - present
+              - absent
+            default: present
+          zone:
+            type: str
+            required: true
+          server:
+            type: str
+          port:
+            type: int
+          protocol:
+            type: str
+            choices:
+              - tcp
+              - udp
+          timeout:
+            type: float
+          ttl:
+            type: int
+      dns_update_server:
+        type: str
+        default: ""
+      dns_update_port:
+        type: int
+        default: 53
+      dns_update_protocol:
+        type: str
+        choices:
+          - tcp
+          - udp
+        default: tcp
+      dns_update_timeout:
+        type: float
+        default: 10.0
+      dns_update_ttl:
+        type: int
+        default: 300
+      dns_update_query_binary:
+        type: str
+        default: /usr/bin/dig
+      dns_update_kinit_binary:
+        type: str
+        default: /usr/bin/kinit
+      dns_update_auth_mode:
+        type: str
+        choices:
+          - gss-tsig
+          - tsig
+          - insecure
+          - none
+        default: gss-tsig
+      dns_update_allow_insecure:
+        type: bool
+        default: false
+      dns_update_key_name:
+        type: str
+        default: ""
+      dns_update_key_secret:
+        type: str
+        no_log: true
+        default: ""
+      dns_update_key_algorithm:
+        type: str
+        choices:
+          - HMAC-MD5.SIG-ALG.REG.INT
+          - hmac-md5
+          - hmac-sha1
+          - hmac-sha224
+          - hmac-sha256
+          - hmac-sha384
+          - hmac-sha512
+        default: hmac-sha256
+      dns_update_kerberos_principal:
+        type: str
+        default: ""
+      dns_update_kerberos_password:
+        type: str
+        no_log: true
+        default: ""
+      dns_update_kerberos_cache_prefix:
+        type: str
+        default: dns-update-
+      dns_update_conflict_policy:
+        type: str
+        choices:
+          - report
+          - replace
+        default: report
+      dns_update_fail_on_error:
+        type: bool
+        default: false
+      dns_update_coordinator:
+        type: str
+        default: ""

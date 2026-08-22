@@ -1,0 +1,37 @@
+---
+# The role is deliberately read-only until both switches are enabled.
+dns_update_enabled: false
+dns_update_manage: false
+
+# community.general.nsupdate executes on the managed host.  Package
+# installation is opt-in and callers must supply platform-specific names.
+dns_update_manage_runtime_dependencies: false
+dns_update_runtime_packages: []
+
+# Every item in dns_update_records must contain its own explicit zone.  A
+# shared default or reverse-zone discovery is intentionally not supported.
+dns_update_records: []
+dns_update_server: ""
+dns_update_port: 53
+dns_update_protocol: tcp
+dns_update_timeout: 10.0
+dns_update_ttl: 300
+dns_update_query_binary: /usr/bin/dig
+dns_update_kinit_binary: /usr/bin/kinit
+
+# GSS-TSIG is the secure default.  Insecure mode is test-only and requires
+# dns_update_allow_insecure to be set explicitly at runtime.
+dns_update_auth_mode: gss-tsig
+dns_update_allow_insecure: false
+dns_update_key_name: ""
+dns_update_key_secret: ""
+dns_update_key_algorithm: hmac-sha256
+dns_update_kerberos_principal: ""
+dns_update_kerberos_password: ""
+dns_update_kerberos_cache_prefix: dns-update-
+
+# A conflicting PTR is reported and left untouched by default.  Set replace
+# only when the caller owns the complete record in an approved DNS zone.
+dns_update_conflict_policy: report
+dns_update_fail_on_error: false
+dns_update_coordinator: ""
