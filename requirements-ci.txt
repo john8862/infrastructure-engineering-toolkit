@@ -1,0 +1,5 @@
+# CI tooling for Python 3.13. Keep the runtime separate from repository code.
+ansible-core==2.21.2
+ansible-lint==26.6.0
+pymarkdownlnt==0.9.39
+yamllint==1.38.0
