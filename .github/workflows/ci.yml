@@ -118,7 +118,7 @@ jobs:
           ansible-lint --offline --profile basic ansible/roles
 
       - name: Lint YAML
-        run: yamllint --strict -d relaxed .github ansible examples tests
+        run: yamllint --strict --config-file .yamllint .github ansible examples tests
 
       - name: Syntax-check DNS and database fixtures
         env:
@@ -168,7 +168,7 @@ jobs:
         run: ./scripts/ci/require-final-union.sh
 
       - name: Lint Markdown
-        run: pymarkdown scan --recurse --respect-gitignore .
+        run: pymarkdown --config .pymarkdown.json scan --recurse --respect-gitignore .
 
       - name: Check Git whitespace
         env:
