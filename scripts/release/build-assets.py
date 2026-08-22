@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 import tarfile
 from typing import Iterable
@@ -32,6 +33,33 @@ SEMVER_RE = re.compile(
 
 REPOSITORY_NAME = "infrastructure-engineering-toolkit"
 ROOT_LICENSE = "LICENSE"
+
+# These are repository paths that are intentionally tracked but are not part
+# of the public FreeIPA archive.  They support repository-local tooling or
+# preserve an empty runtime-output directory.  Every other tracked path under
+# a published FreeIPA input root must be explicitly listed in FREEIPA_FILES.
+FREEIPA_NON_RELEASE_FILES = frozenset(
+    {
+        "components/freeipa-bootstrap/.markdownlint.json",
+        "components/freeipa-bootstrap/generated/.gitkeep",
+    }
+)
+FREEIPA_PUBLISHED_ROOTS = (
+    "components/freeipa-bootstrap/",
+    "examples/freeipa/",
+)
+
+# The builder can identify a small set of known internal-policy and secret
+# markers.  This is a boundary check, not a claim to detect every possible
+# credential or sensitive value.
+KNOWN_FORBIDDEN_CONTENT_MARKERS = (
+    b"PUBLICATION_REVIEW.md",
+    b"SECURITY.md",
+    b"AGENTS.md",
+    b"BEGIN PRIVATE KEY",
+    b"github_pat_",
+    b"ghp_",
+)
 
 
 ROLE_SPECS = (
@@ -207,17 +235,53 @@ def _git_tracked_files(source_root: Path) -> set[str]:
     return {path for path in result.stdout.decode().split("\0") if path}
 
 
+def _regular_tracked_file(source_root: Path, relative: str, tracked: set[str]) -> Path:
+    """Return a tracked regular file contained by the repository root.
+
+    ``Path.is_file`` follows symlinks, so it cannot be used as the sole
+    boundary check for release inputs.  Validate the Git path, lstat the
+    candidate, reject symlinks and non-regular files, and finally resolve the
+    candidate to catch symlinked parent directories before any bytes are read.
+    """
+
+    relative_path = PurePosixPath(relative)
+    if relative_path.is_absolute() or ".." in relative_path.parts or not relative_path.parts:
+        raise ValueError(f"unsafe tracked input path: {relative}")
+    if relative not in tracked:
+        raise ValueError(f"release input is not tracked: {relative}")
+
+    repository_root = source_root.resolve(strict=True)
+    candidate = source_root.joinpath(*relative_path.parts)
+    if candidate.is_symlink():
+        raise ValueError(f"release input is a symlink: {relative}")
+    try:
+        candidate_stat = candidate.lstat()
+    except OSError as exc:
+        raise ValueError(f"release input cannot be inspected: {relative}: {exc}") from exc
+    if not stat.S_ISREG(candidate_stat.st_mode):
+        raise ValueError(f"release input is not a regular file: {relative}")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"release input cannot be resolved: {relative}: {exc}") from exc
+    if not resolved.is_relative_to(repository_root):
+        raise ValueError(f"release input resolves outside repository root: {relative}")
+    return candidate
+
+
 def _validate_allowlist(source_root: Path, tracked: set[str]) -> dict[str, tuple[str, ...]]:
     packages = _all_allowlisted_files()
     missing: list[str] = []
     untracked: list[str] = []
     for package, files in packages.items():
         for relative in files:
-            path = source_root / relative
             if relative not in tracked:
                 untracked.append(f"{package}: {relative}")
-            if not path.is_file() or path.is_symlink():
-                missing.append(f"{package}: {relative}")
+                continue
+            try:
+                _regular_tracked_file(source_root, relative, tracked)
+            except ValueError as exc:
+                missing.append(f"{package}: {relative} ({exc})")
     for role_name, expected_files in ROLE_FILES.items():
         prefix = f"ansible/roles/{role_name}/"
         unexpected = sorted(
@@ -226,8 +290,22 @@ def _validate_allowlist(source_root: Path, tracked: set[str]) -> dict[str, tuple
             if path.startswith(prefix) and path not in expected_files
         )
         untracked.extend(f"ansible-role-{role_name}: unreviewed file {path}" for path in unexpected)
-    if ROOT_LICENSE not in tracked or not (source_root / ROOT_LICENSE).is_file():
+    for prefix in FREEIPA_PUBLISHED_ROOTS:
+        unexpected = sorted(
+            path
+            for path in tracked
+            if path.startswith(prefix)
+            and path not in FREEIPA_FILES
+            and path not in FREEIPA_NON_RELEASE_FILES
+        )
+        untracked.extend(f"freeipa-bootstrap: unreviewed file {path}" for path in unexpected)
+    if ROOT_LICENSE not in tracked:
         missing.append(ROOT_LICENSE)
+    else:
+        try:
+            _regular_tracked_file(source_root, ROOT_LICENSE, tracked)
+        except ValueError as exc:
+            missing.append(f"{ROOT_LICENSE} ({exc})")
     if missing or untracked:
         details = []
         if missing:
@@ -295,18 +373,18 @@ def _iter_archive_entries(
     source_root: Path,
     package: str,
     relative_files: Iterable[str],
+    tracked: set[str],
 ) -> list[tuple[str, bytes, int]]:
     entries: dict[str, tuple[bytes, int]] = {}
     for source_path_text in relative_files:
-        source_path = source_root / source_path_text
+        source_path = _regular_tracked_file(source_root, source_path_text, tracked)
         archive_path = _safe_archive_path(_package_relative(package, source_path_text))
-        if source_path.is_symlink() or not source_path.is_file():
-            raise ValueError(f"archive input is not a regular file: {source_path_text}")
         content = _freeipa_text(archive_path.as_posix(), source_path.read_bytes())
         entries[archive_path.as_posix()] = (content, _file_mode(source_path))
     archive_root = "freeipa-bootstrap" if package == "freeipa-bootstrap" else _role_directory(package)
     license_path = _safe_archive_path(f"{archive_root}/{ROOT_LICENSE}")
-    entries[license_path.as_posix()] = ((source_root / ROOT_LICENSE).read_bytes(), 0o644)
+    root_license = _regular_tracked_file(source_root, ROOT_LICENSE, tracked)
+    entries[license_path.as_posix()] = (root_license.read_bytes(), 0o644)
 
     output: list[tuple[str, bytes, int]] = []
     directories: set[str] = set()
@@ -362,7 +440,7 @@ def _build_archives(source_root: Path, output_dir: Path, version: str) -> list[d
     assets: list[dict[str, object]] = []
     for package, files in packages.items():
         archive_name = f"{package}-v{version}.tar.gz"
-        archive_bytes = _tar_bytes(_iter_archive_entries(source_root, package, files))
+        archive_bytes = _tar_bytes(_iter_archive_entries(source_root, package, files, tracked))
         _write(output_dir / archive_name, archive_bytes)
         assets.append(
             {
@@ -414,11 +492,6 @@ def _validate_archive(path: Path, package: str) -> None:
         "SECURITY.md",
         "AGENTS.md",
     )
-    forbidden_content = (
-        b"PUBLICATION_REVIEW.md",
-        b"SECURITY.md",
-        b"AGENTS.md",
-    )
     with tarfile.open(path, mode="r:gz") as archive:
         members = archive.getmembers()
         if not members:
@@ -439,7 +512,7 @@ def _validate_archive(path: Path, package: str) -> None:
             if any(fragment in member.name for fragment in forbidden_fragments):
                 raise ValueError(f"forbidden archive path: {path.name}: {member.name}")
             content = archive.extractfile(member).read()
-            if any(marker in content for marker in forbidden_content):
+            if any(marker in content for marker in KNOWN_FORBIDDEN_CONTENT_MARKERS):
                 raise ValueError(f"forbidden archive content: {path.name}: {member.name}")
             regular_files.append(member.name)
         if f"{expected_root}/README.md" not in regular_files:

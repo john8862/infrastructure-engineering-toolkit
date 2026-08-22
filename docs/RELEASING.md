@@ -71,9 +71,11 @@ python3 tests/release/test_assets.py
 
 It builds v0.1.0 twice in temporary directories and fails on a changed hash,
 an unexpected path or link, unsafe archive permissions, a forbidden boundary,
-or a checksum mismatch. The builder accepts a strict SemVer value or a
-`v`-prefixed tag and fails closed for malformed versions or non-Git source
-trees. It never creates a tag or GitHub Release itself.
+known internal-policy or credential-marker content, or a checksum mismatch.
+These markers are a bounded contract check, not a claim to detect every
+possible secret. The builder accepts a strict SemVer value or a `v`-prefixed
+tag and fails closed for malformed versions or non-Git source trees. It never
+creates a tag or GitHub Release itself.
 
 No feature-branch workflow run can publish a release. Do not manually edit a
 generated release section while a Release PR is open; correct the source
