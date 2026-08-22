@@ -98,8 +98,17 @@ the local configuration input, waits for configured secondary convergence where 
 rollback on failure. It refuses to run on a DNS secondary or on the read-only `existing` backend. An operating-system
 interface migration is a separate change.
 
-The standalone DNS address-update extension remains a future public component. Its runtime contract and validation are
-pending; callers should use the documented FreeIPA component interface until that work is published.
+The separate `dns_update` Ansible role provides a provider-neutral A/PTR contract for callers that already know the
+authoritative server and zone. Every record declares its own zone; the role never discovers a zone or nameserver. It
+inspects with `dig` first and delegates writes to `community.general.nsupdate` when both `dns_update_enabled` and
+`dns_update_manage` are enabled. GSS-TSIG is the secure default, standard TSIG is optional, and unsigned mode is
+test-only and requires an explicit opt-in. A matching value is a no-op, while a conflicting PTR is reported and left
+untouched by default.
+
+The role is independent of FreeIPA, MariaDB, MaxScale, and VRRP. The pinned example uses `community.general` 13.0.0;
+the role's contract, syntax, `yamllint`, and `ansible-lint` checks pass. Live target validation remains required: a
+local run was blocked before DNS by a Python 3.14 controller RPC incompatibility, so no live DNS deployment outcome is
+claimed.
 
 ## Boundary checklist
 

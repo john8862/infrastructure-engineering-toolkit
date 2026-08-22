@@ -94,6 +94,27 @@ Keep repository, package, service, firewall, and REST health switches disabled u
 certificate paths, credentials, and recovery procedure are approved. A managed reload follows candidate validation and
 is not a failover test.
 
+### DNS A/PTR reconciliation
+
+The DNS update fixture uses explicit documentation records and keeps management disabled:
+
+```bash
+ansible-galaxy collection install \
+  --requirements-file examples/dns-update/requirements.yml \
+  --collections-path ./collections
+ansible-playbook -i localhost, -c local examples/dns-update/site.yml --check
+python3 tests/dns_update/test_contract.py
+```
+
+The pinned example requires `community.general` 13.0.0. The fixture performs read-only `dig` queries; check mode never
+obtains a Kerberos ticket or invokes `community.general.nsupdate`. Every A or PTR record must declare its own zone, and
+the update server must be explicit before both `dns_update_enabled` and `dns_update_manage` are enabled.
+
+GSS-TSIG is the secure default. Standard TSIG is optional and unsigned mode is test-only, disabled by default, and
+requires an explicit opt-in. Supply Kerberos or TSIG credentials through the runtime secret mechanism. The contract,
+syntax, `yamllint`, and `ansible-lint` checks pass; live target validation remains required because a local run was
+blocked before DNS by a Python 3.14 controller RPC incompatibility.
+
 ### Keepalived
 
 The fixture is deliberately disabled and only syntax-checks the role:

@@ -16,12 +16,15 @@ integrated repository; it does not claim that a component has been exercised on 
 | MariaDB replication | Ansible role | One writable primary and one or more asynchronous replicas, with GTID by default, optional file/position mode, and health reporting | Available; data copy and failover remain outside the role | [role guide](ansible/roles/mariadb_replication/README.md) |
 | MaxScale | Ansible role | Generic server, monitor, service, listener, TLS-path, logging, and guarded validation model | Available; MaxScale software is not included | [role guide](ansible/roles/maxscale/README.md) |
 | Keepalived | Ansible role | Independent VRRP instances, optional least-privilege health-script references, and opt-in generic firewall rules | Available; database and proxy health semantics remain with the caller | [role guide](ansible/roles/keepalived/README.md) |
-| DNS address-update extension | Pending component | A future public contract for safe address reconciliation across supported DNS backends | Runtime contract and validation pending | [roadmap](docs/roadmap.md) |
+| DNS A/PTR reconciliation | Ansible role | Explicit caller-supplied A and PTR inspection and reconciliation through the official `community.general.nsupdate` module | Available; live target validation remains required | [role guide](ansible/roles/dns_update/README.md) |
 
 The roles are not a single installer. The MariaDB baseline does not configure a replication channel; the replication
 role does not initialise data; MaxScale does not create database accounts or claim a virtual IP; and Keepalived does
 not infer application health. These boundaries keep FreeIPA/DNS independently usable from the MariaDB/MaxScale/VRRP
 data plane.
+
+The DNS update role's contract, syntax, `yamllint`, and `ansible-lint` checks pass. A local live run was blocked before
+reaching DNS by a Python 3.14 controller RPC incompatibility, so the repository makes no live DNS deployment claim.
 
 ## Architecture and operations
 
@@ -52,6 +55,7 @@ namespace. They do not represent reachable hosts.
 | MariaDB replication example and tests | [`examples/mariadb-replication/playbook.yml`](examples/mariadb-replication/playbook.yml), [`tests/mariadb_replication`](tests/mariadb_replication) |
 | MaxScale fixture and tests | [`examples/maxscale-ha/site.yml`](examples/maxscale-ha/site.yml), [`tests/maxscale`](tests/maxscale) |
 | Keepalived fixture and tests | [`examples/keepalived/playbook.yml`](examples/keepalived/playbook.yml), [`tests/keepalived`](tests/keepalived) |
+| DNS update example and tests | [`examples/dns-update/site.yml`](examples/dns-update/site.yml), [`tests/dns_update/test_contract.py`](tests/dns_update/test_contract.py) |
 | Licence | [`LICENSE`](LICENSE) |
 
 Begin with the component README and run its syntax or read-only checks before making state-changing changes. Keep
@@ -72,8 +76,8 @@ passwords, certificates, private keys, access tokens, and environment-specific i
 
 Original automation, examples, and documentation in this repository are provided under the [MIT License](LICENSE).
 An MIT-licensed role is not a licence for the software it installs or configures. MariaDB Server, FreeIPA, BIND,
-Webmin, Technitium DNS Server, MaxScale, Keepalived, Ansible collections, and operating-system packages retain their
-own licences, repository terms, trademarks, and attribution requirements.
+Webmin, Technitium DNS Server, MaxScale, Keepalived, `community.general`, other Ansible collections, and operating-system
+packages retain their own licences, repository terms, trademarks, and attribution requirements.
 
 MaxScale has an explicit boundary: this repository does not redistribute MaxScale software, packages, repository
 metadata, vendor legal text, or credentials, and it does not relicense MaxScale. The role only renders a caller-supplied

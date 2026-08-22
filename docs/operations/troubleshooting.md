@@ -49,6 +49,23 @@ check on a fresh host is not evidence of runtime convergence.
 In position mode, every file and position must belong to the exact consistent copy being configured. In GTID mode,
 `gtid_slave_pos`/`replica_pos` must describe that copy; the role does not derive it from a backup.
 
+## DNS A/PTR reconciliation
+
+| Symptom | First checks | Bounded response |
+| --- | --- | --- |
+| No DNS records are queried or changed | `dns_update_enabled`, `dns_update_manage`, coordinator, and the play output | Both switches are intentionally `false` by default. Enable management only with an explicit server, zone, ownership, and authentication policy. |
+| A record definition is rejected | Record `name`, `type`, `value`, `state`, explicit `zone`, and optional per-record transport values | Use only `A` or `PTR`; declare the zone for every record. The role does not discover reverse zones or authoritative servers. |
+| A lookup fails | `dig` availability, explicit server, TCP/UDP setting, port, timeout, and resolver reachability | Treat a failed lookup as unknown, not proof that the record is absent. Correct the query path before enabling writes. |
+| GSS-TSIG authentication fails | Kerberos client, principal, password source, realm, `kinit`, and temporary credential-cache handling | Correct the external Kerberos path. The role never stores the password and does not obtain a ticket in check mode. |
+| TSIG authentication fails | External key name, secret, algorithm, server, and zone ACL | Use a supported HMAC algorithm and runtime secret source. Do not fall back to unsigned updates. |
+| A different PTR already exists | `dns_update_conflict_policy` and the current value reported by the role | `report` leaves the conflict untouched. Use `replace` only after establishing ownership of the complete managed record. |
+| One record fails while others continue | Per-record result, `dns_rc`, `query_failed`, and `dns_update_fail_on_error` | This is the default isolation behaviour. Set `dns_update_fail_on_error: true` only when DNS is a hard prerequisite. |
+| Collection or runtime dependency is missing | Pinned `community.general` 13.0.0, target-side `dnspython`, and GSS-TSIG `gssapi`/Kerberos dependencies | Install dependencies in the intended execution environment; collections are not bundled. |
+| A local run fails before reaching DNS | Controller Python and Ansible RPC environment | A Python 3.14 controller RPC incompatibility can block local execution before DNS. Re-run from a supported controller/target environment; no live deployment outcome is implied. |
+
+The role's contract, syntax, `yamllint`, and `ansible-lint` checks pass. Check mode performs read-only inspection and
+does not invoke `community.general.nsupdate`.
+
 ## MaxScale
 
 | Symptom | First checks | Bounded response |

@@ -16,16 +16,20 @@ when the corresponding interface and tests are ready.
   and firewall integration, and explicit MariaDB licensing boundaries. MaxScale software is not included.
 - The Keepalived role provides independent VRRP instances with protected existing-deployment defaults and optional
   generic firewall rules.
-- The standalone DNS address-update extension has no published runtime contract yet; exact runtime validation is
-  pending.
+- The `dns_update` role provides explicit A/PTR inspection and optional reconciliation through the official
+  `community.general.nsupdate` module. GSS-TSIG is the secure default, TSIG is optional, and unsigned mode is test-only
+  and disabled by default. Its contract, syntax, `yamllint`, and `ansible-lint` checks pass.
+- Live DNS target validation remains pending. A local run was blocked before reaching DNS by a Python 3.14 controller
+  RPC incompatibility, so no live deployment outcome is claimed.
 
 ## Near-term work
 
-### Complete the DNS address-update contract
+### Validate DNS updates on a supported target
 
-Publish a provider-neutral interface for address reconciliation, including the accepted record set, authoritative-node
-requirements, dry-run output, rollback behaviour, and secondary convergence checks. Add static tests and disposable-host
-runtime tests before marking the extension available. Until then, use the documented FreeIPA component path.
+Exercise explicit A/PTR records against a disposable authoritative service using external GSS-TSIG or TSIG credentials.
+Confirm read-only check-mode behaviour, per-record error isolation, PTR conflict handling, and the hard-failure switch.
+Repeat the run with a supported controller Python/Ansible environment before making a live-runtime claim. The role must
+continue to require an explicit server and zone and must not infer authority.
 
 ### Add composition fixtures without coupling roles
 

@@ -27,6 +27,7 @@ The arrows describe a possible traffic path, not an automatic deployment. Each l
 | MaxScale | Data-only server/monitor/service/listener model, configuration rendering, candidate validation, optional service reload, logging, and optional health endpoint check | Caller-supplied backend addresses, module options, credentials from an external secret workflow, and TLS paths | MariaDB account creation, database state, binlog retention, external replicas, VIP ownership, DNS, or software redistribution |
 | Keepalived | Independent VRRP instances, peer selection, least-privilege references to caller-supplied health programs, and opt-in generic VRRP firewall rules | Explicit interface, peer, priority, VIP, and health-script paths | Database/proxy semantics, service discovery, DNS changes, failover policy, or health-program implementation |
 | DNS | Names, zones, A/PTR/SRV/TXT records, and provider-specific authority or transfer policy | An approved external zone policy and component-produced record contract | Identity policy, database failover, VIP ownership, or application-level health decisions |
+| `dns_update` | Explicit A/PTR inspection and optional reconciliation, per-record result reporting, and conservative PTR conflict handling | Caller-supplied server, zone, record values, and external GSS-TSIG or TSIG credentials | Zone or server discovery, FreeIPA/MariaDB/MaxScale/VRRP state, and unsigned production updates |
 
 ## MariaDB foundation before topology
 
@@ -103,6 +104,22 @@ is healthy or claim a VIP. A caller may choose one of these patterns:
 The choice belongs to the caller's service design. It must not be inferred by combining role names. Use documentation
 addresses such as `192.0.2.20` for a VIP, `198.51.100.10` for a proxy listener, and `203.0.113.11`/`203.0.113.12` for
 database examples.
+
+## Explicit A/PTR reconciliation
+
+The `dns_update` role handles a different concern from DNS authority: it reconciles caller-supplied records when the
+caller already knows the update server and zone. A record must declare `name`, `type` (`A` or `PTR`), `value`, `zone`,
+and `state`; reverse-zone discovery is intentionally absent. The role queries current values first, reports matching
+values as unchanged, and leaves a different PTR untouched when the default `report` conflict policy is active.
+
+Both `dns_update_enabled` and `dns_update_manage` default to `false`. Check mode performs read-only inspection and never
+obtains a Kerberos ticket or invokes `community.general.nsupdate`. GSS-TSIG is the secure default, standard TSIG is
+optional, and unsigned mode requires an explicit test-only opt-in. Credentials are supplied at runtime and are not
+stored in the repository. The pinned example uses `community.general` 13.0.0.
+
+The role's contract, syntax, `yamllint`, and `ansible-lint` checks pass. Live target validation remains required: a
+local run was blocked before reaching DNS by a Python 3.14 controller RPC incompatibility, so this composition guide
+does not claim a live DNS deployment outcome.
 
 ## Suggested composition sequence
 
