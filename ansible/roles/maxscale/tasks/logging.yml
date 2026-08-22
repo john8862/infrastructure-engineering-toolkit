@@ -1,0 +1,30 @@
+---
+- name: Ensure the MaxScale log directory has restricted ownership
+  ansible.builtin.file:
+    path: "{{ maxscale_log_directory }}"
+    state: directory
+    owner: "{{ maxscale_service_user }}"
+    group: "{{ maxscale_service_group }}"
+    mode: "0750"
+
+- name: Validate MaxScale logging policy
+  ansible.builtin.assert:
+    that:
+      - maxscale_logging_options.maxlog | default(false) | bool
+        or maxscale_logging_options.syslog | default(false) | bool
+    fail_msg: Enable maxlog or syslog in maxscale_logging_options.
+
+- name: Install MaxScale logrotate policy
+  ansible.builtin.template:
+    src: maxscale.logrotate.j2
+    dest: "{{ maxscale_logrotate_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: maxscale_logrotate_enabled | bool
+
+- name: Remove MaxScale logrotate policy when disabled
+  ansible.builtin.file:
+    path: "{{ maxscale_logrotate_file }}"
+    state: absent
+  when: not maxscale_logrotate_enabled | bool

@@ -1,0 +1,77 @@
+---
+- name: Validate the complete MaxScale candidate configuration
+  ansible.builtin.command:
+    argv:
+      - "{{ maxscale_binary }}"
+      - --config-check
+      - "--config={{ maxscale_config_file }}"
+  register: maxscale_candidate_check
+  changed_when: false
+  check_mode: false
+  when:
+    - maxscale_config_validate_enabled | bool
+    - not ansible_check_mode
+
+- name: Flush MaxScale reload handlers only after candidate validation
+  ansible.builtin.meta: flush_handlers
+  when:
+    - maxscale_manage_service | bool
+    - maxscale_reload_on_change | bool
+    - not ansible_check_mode
+
+- name: Start and enable MaxScale when service management is enabled
+  ansible.builtin.systemd:
+    name: "{{ maxscale_service_name }}"
+    enabled: true
+    state: started
+  when:
+    - maxscale_manage_service | bool
+    - not ansible_check_mode
+
+- name: Gather MaxScale service facts after reconciliation
+  ansible.builtin.service_facts:
+  when:
+    - maxscale_manage_service | bool
+    - not ansible_check_mode
+
+- name: Require an active MaxScale service
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services.get(maxscale_service_name ~ '.service', {}).state == 'running'
+    fail_msg: MaxScale did not remain active after the validated configuration was applied.
+  when:
+    - maxscale_manage_service | bool
+    - not ansible_check_mode
+
+- name: Check the MaxScale REST health endpoint after reload
+  ansible.builtin.uri:
+    url: "{{ maxscale_health_check_url }}"
+    method: GET
+    status_code: "{{ maxscale_health_check_status_code }}"
+    timeout: "{{ maxscale_health_check_timeout }}"
+    user: "{{ maxscale_health_check_user }}"
+    password: "{{ maxscale_health_check_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ maxscale_health_check_validate_certs | bool }}"
+    return_content: false
+  register: maxscale_health_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - maxscale_manage_service | bool
+    - maxscale_health_check_enabled | bool
+    - not ansible_check_mode
+
+- name: Require a healthy MaxScale REST endpoint when health validation is enabled
+  ansible.builtin.assert:
+    that:
+      - maxscale_health_check.status | default(0) | int == maxscale_health_check_status_code | int
+    fail_msg: >-
+      MaxScale is running but the configured REST health endpoint did not
+      return the expected status. Investigate before serving traffic.
+  when:
+    - maxscale_manage_service | bool
+    - maxscale_health_check_enabled | bool
+    - not ansible_check_mode
+  no_log: true

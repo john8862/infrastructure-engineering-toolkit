@@ -1,0 +1,175 @@
+---
+- name: Validate the supported MaxScale platform
+  ansible.builtin.assert:
+    that:
+      - maxscale_allow_unsupported_platform | bool
+        or (ansible_facts.distribution == maxscale_supported_distribution
+            and ansible_facts.distribution_release in maxscale_supported_releases)
+    fail_msg: >-
+      This generic role supports Ubuntu {{ maxscale_supported_releases | join(', ') }}
+      by default. Set maxscale_allow_unsupported_platform only after validating
+      the target package and service integration.
+
+- name: Validate the MaxScale package and path model
+  ansible.builtin.assert:
+    that:
+      - maxscale_package_name | length > 0
+      - maxscale_service_name | length > 0
+      - maxscale_config_file | length > 0
+      - maxscale_config_dir | length > 0
+      - maxscale_package_state in ['present', 'latest']
+      - maxscale_repository_series is match('^[0-9]+\\.[0-9]+$')
+      - maxscale_repository_key_fingerprint is match('^[A-Fa-f0-9]{40}$')
+    fail_msg: MaxScale package, repository, and configuration path settings are incomplete or invalid.
+
+- name: Validate the MaxScale global option map
+  ansible.builtin.assert:
+    that:
+      - maxscale_global_options is mapping
+      - maxscale_logging_options is mapping
+      - maxscale_logging_options.maxlog | default(false) | bool
+        or maxscale_logging_options.syslog | default(false) | bool
+    fail_msg: MaxScale global and logging options must be maps with maxlog or syslog enabled.
+
+- name: Validate unique MaxScale object names
+  ansible.builtin.assert:
+    that:
+      - (maxscale_servers | map(attribute='name') | list | unique | length) == (maxscale_servers | length)
+      - (maxscale_monitors | map(attribute='name') | list | unique | length) == (maxscale_monitors | length)
+      - (maxscale_services | map(attribute='name') | list | unique | length) == (maxscale_services | length)
+      - (maxscale_listeners | map(attribute='name') | list | unique | length) == (maxscale_listeners | length)
+      - item.name is defined
+      - item.name | string | length > 0
+      - item.name is match('^[A-Za-z0-9_.-]+$')
+    fail_msg: MaxScale object names must be non-empty, identifier-safe, and unique within each object type.
+  loop: "{{ maxscale_servers + maxscale_monitors + maxscale_services + maxscale_listeners }}"
+  loop_control:
+    label: "{{ item.name | default('unnamed') }}"
+  no_log: true
+
+- name: Build effective MaxScale object option maps
+  ansible.builtin.set_fact:
+    maxscale_server_options_effective: >-
+      {{ maxscale_server_options_effective | default({})
+         | combine({item.name: ((item.options | default({}))
+           | combine(item.ssl | default({}), recursive=true))}, recursive=true) }}
+  loop: "{{ maxscale_servers }}"
+  loop_control:
+    label: "server:{{ item.name }}"
+
+- name: Build effective MaxScale listener option maps
+  ansible.builtin.set_fact:
+    maxscale_listener_options_effective: >-
+      {{ maxscale_listener_options_effective | default({})
+         | combine({item.name: ((item.options | default({}))
+           | combine(item.ssl | default({}), recursive=true))}, recursive=true) }}
+  loop: "{{ maxscale_listeners }}"
+  loop_control:
+    label: "listener:{{ item.name }}"
+
+- name: Build effective MaxScale monitor option maps
+  ansible.builtin.set_fact:
+    maxscale_monitor_options_effective: >-
+      {{ maxscale_monitor_options_effective | default({})
+         | combine({item.name: (item.options | default({}))}, recursive=true) }}
+  loop: "{{ maxscale_monitors }}"
+  loop_control:
+    label: "monitor:{{ item.name }}"
+
+- name: Validate MaxScale server definitions
+  ansible.builtin.assert:
+    that:
+      - item.address is defined
+      - item.address | string | length > 0
+      - item.port | default(3306) | int > 0
+      - item.port | default(3306) | int < 65536
+    fail_msg: Each MaxScale server needs a non-empty address and valid TCP port.
+  loop: "{{ maxscale_servers }}"
+  loop_control:
+    label: "server:{{ item.name }}"
+
+- name: Validate MaxScale monitor definitions
+  ansible.builtin.assert:
+    that:
+      - item.module | default('mariadbmon') in maxscale_allowed_monitor_modules
+      - item.servers is defined
+      - item.servers | length > 0
+      - (item.servers | unique | length) == (item.servers | length)
+      - (item.servers | difference(maxscale_servers | map(attribute='name') | list) | length) == 0
+    fail_msg: Each monitor needs an allowed module and existing backend server references.
+  loop: "{{ maxscale_monitors }}"
+  loop_control:
+    label: "monitor:{{ item.name }}"
+
+- name: Validate MaxScale service definitions
+  ansible.builtin.assert:
+    that:
+      - item.router in maxscale_allowed_service_routers
+      - item.servers | default([]) | length > 0
+      - (item.servers | difference(maxscale_servers | map(attribute='name') | list) | length) == 0
+    fail_msg: Each service needs an allowed router and existing backend server references.
+  loop: "{{ maxscale_services }}"
+  loop_control:
+    label: "service:{{ item.name }}"
+
+- name: Validate MaxScale listener definitions
+  ansible.builtin.assert:
+    that:
+      - item.service in (maxscale_services | map(attribute='name') | list)
+      - item.port is defined or item.socket is defined
+      - (item.port is not defined) or (item.port | int > 0 and item.port | int < 65536)
+      - (item.port is defined) or (item.socket | string | length > 0)
+    fail_msg: Each listener needs an existing service and a valid port or Unix socket.
+  loop: "{{ maxscale_listeners }}"
+  loop_control:
+    label: "listener:{{ item.name }}"
+
+- name: Reject out-of-scope Binlog Router service definitions
+  ansible.builtin.assert:
+    that:
+      - item.router | default('') not in ['binlogrouter', 'binlog_router']
+      - item.name | lower not in ['binlog-service', 'binlog-listener']
+    fail_msg: Binlog Router objects are intentionally outside this bounded MaxScale core.
+  loop: "{{ maxscale_services + maxscale_listeners }}"
+  loop_control:
+    label: "{{ item.name | default('unnamed') }}"
+
+- name: Set the generic TLS asset list without relying on inventory topology
+  ansible.builtin.set_fact:
+    maxscale_tls_assets_effective:
+      - name: admin
+        enabled: "{{ maxscale_admin_tls_enabled | bool }}"
+        certificate: "{{ maxscale_admin_tls_cert }}"
+        private_key: "{{ maxscale_admin_tls_key }}"
+        ca: "{{ maxscale_admin_tls_ca }}"
+        verify_peer: "{{ maxscale_admin_tls_verify_peer | bool }}"
+  # The object-specific assets are appended in the next three loops. Keeping
+  # this explicit makes the external-file boundary visible to reviewers.
+
+- name: Append server TLS assets
+  ansible.builtin.set_fact:
+    maxscale_tls_assets_effective: "{{ maxscale_tls_assets_effective + [ {
+      'name': 'server:' ~ item.name,
+      'enabled': (maxscale_server_options_effective[item.name].get('ssl', false) | bool),
+      'certificate': maxscale_server_options_effective[item.name].get('ssl_cert', ''),
+      'private_key': maxscale_server_options_effective[item.name].get('ssl_key', ''),
+      'ca': maxscale_server_options_effective[item.name].get('ssl_ca', ''),
+      'verify_peer': (maxscale_server_options_effective[item.name].get('ssl_verify_peer_certificate', false) | bool)
+    } ] }}"
+  loop: "{{ maxscale_servers }}"
+  loop_control:
+    label: "server:{{ item.name }}"
+
+- name: Append listener TLS assets
+  ansible.builtin.set_fact:
+    maxscale_tls_assets_effective: "{{ maxscale_tls_assets_effective + [ {
+      'name': 'listener:' ~ item.name,
+      'enabled': (maxscale_listener_options_effective[item.name].get('ssl', false) | bool),
+      'certificate': maxscale_listener_options_effective[item.name].get('ssl_cert', ''),
+      'private_key': maxscale_listener_options_effective[item.name].get('ssl_key', ''),
+      'ca': maxscale_listener_options_effective[item.name].get('ssl_ca', ''),
+      'verify_peer': (maxscale_listener_options_effective[item.name].get('ssl_verify_peer_certificate', false) | bool)
+    } ] }}"
+  loop: "{{ maxscale_listeners }}"
+  loop_control:
+    label: "listener:{{ item.name }}"

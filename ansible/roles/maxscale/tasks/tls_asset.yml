@@ -1,0 +1,97 @@
+---
+- name: Validate MaxScale TLS asset declaration
+  ansible.builtin.assert:
+    that:
+      - not maxscale_tls_asset.enabled | bool
+        or (maxscale_tls_asset.certificate | default('') | string | length > 0
+            and maxscale_tls_asset.private_key | default('') | string | length > 0)
+      - not (maxscale_tls_asset.enabled | bool and maxscale_tls_asset.verify_peer | bool
+             and maxscale_tls_require_ca_for_peer_verification | bool)
+        or maxscale_tls_asset.ca | default('') | string | length > 0
+    fail_msg: >-
+      TLS asset {{ maxscale_tls_asset.name }} requires paired certificate and
+      private-key paths, plus a CA path when peer verification is enabled.
+
+- name: Inspect the externally managed MaxScale certificate path
+  ansible.builtin.stat:
+    path: "{{ maxscale_tls_asset.certificate }}"
+    get_mime: false
+    get_checksum: false
+  register: maxscale_tls_certificate_stat
+  when:
+    - maxscale_tls_asset.enabled | bool
+    - maxscale_tls_asset.certificate | default('') | string | length > 0
+  no_log: true
+
+- name: Inspect the externally managed MaxScale private-key path
+  ansible.builtin.stat:
+    path: "{{ maxscale_tls_asset.private_key }}"
+    get_mime: false
+    get_checksum: false
+  register: maxscale_tls_private_key_stat
+  when:
+    - maxscale_tls_asset.enabled | bool
+    - maxscale_tls_asset.private_key | default('') | string | length > 0
+  no_log: true
+
+- name: Inspect the externally managed MaxScale CA path
+  ansible.builtin.stat:
+    path: "{{ maxscale_tls_asset.ca }}"
+    get_mime: false
+    get_checksum: false
+  register: maxscale_tls_ca_stat
+  when:
+    - maxscale_tls_asset.enabled | bool
+    - maxscale_tls_asset.ca | default('') | string | length > 0
+  no_log: true
+
+- name: Require existing regular MaxScale TLS files
+  ansible.builtin.assert:
+    that:
+      - not maxscale_tls_asset.enabled | bool
+        or (maxscale_tls_certificate_stat.stat.exists | default(false) | bool
+            and maxscale_tls_certificate_stat.stat.isreg | default(false) | bool)
+      - not maxscale_tls_asset.enabled | bool
+        or (maxscale_tls_private_key_stat.stat.exists | default(false) | bool
+            and maxscale_tls_private_key_stat.stat.isreg | default(false) | bool)
+      - not (maxscale_tls_asset.enabled | bool
+             and maxscale_tls_asset.verify_peer | bool
+             and maxscale_tls_require_ca_for_peer_verification | bool)
+        or (maxscale_tls_ca_stat.stat.exists | default(false) | bool
+            and maxscale_tls_ca_stat.stat.isreg | default(false) | bool)
+    fail_msg: >-
+      One or more external TLS paths for {{ maxscale_tls_asset.name }} do not
+      exist as regular files. Provision them through an external PKI workflow.
+  no_log: true
+
+- name: Validate the external MaxScale certificate hostname when requested
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ maxscale_tls_asset.certificate }}"
+      - -noout
+      - -checkhost
+      - "{{ maxscale_tls_expected_hostname }}"
+  register: maxscale_tls_hostname_check
+  changed_when: false
+  check_mode: false
+  when:
+    - maxscale_tls_asset.enabled | bool
+    - maxscale_tls_validate_hostname | bool
+    - maxscale_tls_expected_hostname | string | length > 0
+  no_log: true
+
+- name: Require the external MaxScale certificate hostname to match
+  ansible.builtin.assert:
+    that:
+      - maxscale_tls_hostname_check.rc | default(1) | int == 0
+    fail_msg: >-
+      The externally managed certificate for {{ maxscale_tls_asset.name }}
+      does not match maxscale_tls_expected_hostname.
+  when:
+    - maxscale_tls_asset.enabled | bool
+    - maxscale_tls_validate_hostname | bool
+    - maxscale_tls_expected_hostname | string | length > 0
+  no_log: true

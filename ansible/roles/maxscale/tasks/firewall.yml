@@ -1,0 +1,62 @@
+---
+- name: Detect the existing UFW executable
+  ansible.builtin.command: command -v ufw
+  register: maxscale_ufw_binary
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Inspect the existing UFW policy
+  ansible.builtin.command: ufw status
+  register: maxscale_ufw_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: maxscale_ufw_binary.rc | default(1) | int == 0
+
+- name: Require an inspectable firewall backend
+  ansible.builtin.assert:
+    that:
+      - maxscale_ufw_binary.rc | default(1) | int == 0
+      - maxscale_ufw_status.rc | default(1) | int == 0
+    fail_msg: >-
+      maxscale_firewall_enabled=true requires an already installed and
+      inspectable UFW policy. The role does not install or enable UFW.
+
+- name: Start with caller-supplied MaxScale firewall rules
+  ansible.builtin.set_fact:
+    maxscale_firewall_rules_effective: "{{ maxscale_firewall_rules | list }}"
+
+- name: Add listener ports to the generic firewall policy
+  ansible.builtin.set_fact:
+    maxscale_firewall_rules_effective: >-
+      {{ maxscale_firewall_rules_effective + [
+           {'port': item.port, 'protocol': 'tcp', 'sources': maxscale_firewall_allow_sources}
+         ] }}
+  loop: "{{ maxscale_listeners }}"
+  loop_control:
+    label: "listener:{{ item.name }}"
+  when:
+    - maxscale_firewall_include_listener_ports | bool
+    - item.port is defined
+    - >-
+      (maxscale_firewall_rules_effective
+       | selectattr('port', 'equalto', item.port) | list | length) == 0
+
+- name: Add the exposed admin API port to the firewall policy
+  ansible.builtin.set_fact:
+    maxscale_firewall_rules_effective: >-
+      {{ maxscale_firewall_rules_effective + [
+           {'port': maxscale_admin_port, 'protocol': 'tcp', 'sources': maxscale_firewall_allow_sources}
+         ] }}
+  when:
+    - maxscale_firewall_include_admin_port | bool
+    - maxscale_admin_enabled | bool
+    - maxscale_admin_host not in ['127.0.0.1', '::1', 'localhost']
+
+- name: Apply generic MaxScale UFW allow rules
+  ansible.builtin.include_tasks: firewall_rule.yml
+  loop: "{{ maxscale_firewall_rules_effective }}"
+  loop_control:
+    loop_var: maxscale_firewall_rule
+    label: "{{ maxscale_firewall_rule.port }}/{{ maxscale_firewall_rule.protocol | default('tcp') }}"

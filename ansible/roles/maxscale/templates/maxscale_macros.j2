@@ -1,0 +1,18 @@
+{% macro render_value(value) -%}
+{%- if value is boolean -%}
+{{ 'true' if value else 'false' }}
+{%- elif value is mapping -%}
+{{ value | to_json }}
+{%- elif value is sequence and value is not string -%}
+{{ value | join(',') }}
+{%- else -%}
+{{ value }}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro render_options(options) %}
+{% for name in options.keys() | sort %}
+{% set value = options[name] %}
+{{ name }}={{ render_value(value) }}
+{% endfor %}
+{% endmacro %}

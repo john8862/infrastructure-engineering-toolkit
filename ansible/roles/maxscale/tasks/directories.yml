@@ -1,0 +1,25 @@
+---
+- name: Create MaxScale runtime directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(maxscale_service_user) }}"
+    group: "{{ item.group | default(maxscale_service_group) }}"
+    mode: "{{ item.mode | default('0750') }}"
+  loop:
+    - path: "{{ maxscale_data_directory }}"
+    - path: "{{ maxscale_persist_directory }}"
+    - path: "{{ maxscale_log_directory }}"
+    - path: "{{ maxscale_run_directory }}"
+    - path: "{{ maxscale_cache_directory }}"
+    - path: "{{ maxscale_certificate_directory }}"
+      owner: "{{ maxscale_certificate_directory_owner }}"
+      group: "{{ maxscale_certificate_directory_group }}"
+
+- name: Create the MaxScale configuration directory
+  ansible.builtin.file:
+    path: "{{ maxscale_config_dir }}"
+    state: directory
+    owner: "{{ maxscale_config_owner }}"
+    group: "{{ maxscale_config_group }}"
+    mode: "{{ maxscale_config_dir_mode }}"

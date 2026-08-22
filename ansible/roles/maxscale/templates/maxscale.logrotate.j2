@@ -1,0 +1,13 @@
+{{ maxscale_logrotate_files | join(' ') }} {
+    {{ maxscale_logrotate_frequency }}
+    rotate {{ maxscale_logrotate_rotate }}
+{% if maxscale_logrotate_compress | bool %}    compress
+{% endif %}{% if maxscale_logrotate_delaycompress | bool %}    delaycompress
+{% endif %}{% if maxscale_logrotate_missingok | bool %}    missingok
+{% endif %}{% if maxscale_logrotate_notifempty | bool %}    notifempty
+{% endif %}    create {{ maxscale_logrotate_create_mode }} {{ maxscale_logrotate_create_owner }} {{ maxscale_logrotate_create_group }}
+    sharedscripts
+    postrotate
+        {{ maxscale_logrotate_postrotate_command }} >/dev/null 2>&1 || true
+    endscript
+}

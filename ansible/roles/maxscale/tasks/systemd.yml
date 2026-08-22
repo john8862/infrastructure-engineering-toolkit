@@ -1,0 +1,30 @@
+---
+- name: Determine whether a MaxScale systemd drop-in is requested
+  ansible.builtin.set_fact:
+    maxscale_systemd_override_required: >-
+      {{ maxscale_systemd_override_enabled | bool
+         or maxscale_systemd_timeout_start_sec | string | length > 0
+         or maxscale_systemd_timeout_stop_sec | string | length > 0
+         or maxscale_systemd_limit_nofile | string | length > 0
+         or maxscale_systemd_environment | length > 0 }}
+
+- name: Install MaxScale systemd drop-in
+  ansible.builtin.template:
+    src: maxscale-systemd-override.conf.j2
+    dest: "{{ maxscale_systemd_override_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: maxscale_systemd_override_required | bool
+  notify:
+    - maxscale daemon reload
+    - maxscale reload
+
+- name: Remove MaxScale systemd drop-in when not requested
+  ansible.builtin.file:
+    path: "{{ maxscale_systemd_override_file }}"
+    state: absent
+  when: not maxscale_systemd_override_required | bool
+  notify:
+    - maxscale daemon reload
+    - maxscale reload

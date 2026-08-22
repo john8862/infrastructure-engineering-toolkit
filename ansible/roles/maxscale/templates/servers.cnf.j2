@@ -1,0 +1,10 @@
+{% from 'maxscale_macros.j2' import render_options %}
+# Managed by Ansible.  Backend server definitions.
+{% for server in maxscale_servers %}
+[{{ server.name }}]
+type=server
+address={{ server.address }}
+port={{ server.port | default(3306) }}
+protocol={{ server.protocol | default('MariaDBBackend') }}
+{{ render_options(maxscale_server_options_effective.get(server.name, {})) }}
+{% endfor %}
