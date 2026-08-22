@@ -1,6 +1,6 @@
 # Composing MariaDB replication, MaxScale, and VRRP without hidden coupling
 
-*Article draft — Infrastructure Engineering Toolkit*
+> Article draft — Infrastructure Engineering Toolkit
 
 High availability is not a single role. It is a sequence of independently verifiable decisions: how data is replicated,
 how clients find a service, how a proxy selects a backend, and how an address moves between nodes. Treating each concern
