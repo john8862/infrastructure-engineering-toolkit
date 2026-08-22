@@ -57,6 +57,14 @@ history, and annotated tags for published baselines. Release notes should descri
 validation performed, known limitations, and third-party terms without claiming unverified deployment outcomes. A tag
 must identify the exact source tree and corresponding changelog entry.
 
+### Initial public release target
+
+The initial public baseline is targeted as `0.1.0`. This pre-1.0 marker identifies a
+coherent, reviewable toolkit baseline while the component interfaces and disposable-host
+validation continue to mature. It is a release milestone, not a claim of production
+readiness or universal platform compatibility; release notes will state the tested
+scope, known limitations, and third-party terms for the exact source tree.
+
 Breaking configuration or CLI changes are major-version work once public interfaces are stable. Backward-compatible
 features are minor changes; fixes and documentation corrections are patch changes. During `0.x` development, the
 compatibility contract may still require a minor release for a breaking adjustment.
