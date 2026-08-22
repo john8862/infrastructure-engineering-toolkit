@@ -1,0 +1,38 @@
+# Managed by Ansible: GTID/binlog baseline. Topology is intentionally absent.
+[mariadbd]
+log-basename = {{ mariadb_log_basename }}
+{% if mariadb_log_bin | bool %}
+log-bin = {{ mariadb_binlog_basename }}
+{% else %}
+skip-log-bin
+{% endif %}
+binlog-format = {{ mariadb_binlog_format }}
+binlog-row-image = {{ mariadb_binlog_row_image }}
+gtid-domain-id = {{ mariadb_gtid_domain_id }}
+gtid-strict-mode = {{ 1 if mariadb_gtid_strict_mode | bool else 0 }}
+sync-binlog = {{ mariadb_sync_binlog }}
+sync-relay-log = {{ mariadb_sync_relay_log }}
+sync-relay-log-info = {{ mariadb_sync_relay_log_info }}
+sync-master-info = {{ mariadb_sync_master_info }}
+expire-logs-days = {{ mariadb_expire_logs_days }}
+max-binlog-size = {{ mariadb_max_binlog_size }}
+log-slave-updates = {{ 1 if mariadb_log_slave_updates | bool else 0 }}
+relay-log = {{ mariadb_relay_log_basename }}
+relay-log-recovery = {{ 1 if mariadb_relay_log_recovery | bool else 0 }}
+relay-log-purge = {{ 1 if mariadb_relay_log_purge | bool else 0 }}
+slave-parallel-mode = {{ mariadb_slave_parallel_mode }}
+slave-parallel-threads = {{ mariadb_slave_parallel_threads }}
+slave-connections-needed-for-purge = {{ mariadb_slave_connections_needed_for_purge }}
+skip-slave-start = {{ 1 if mariadb_skip_slave_start | bool else 0 }}
+{% for database in mariadb_binlog_do_db %}
+binlog-do-db = {{ database }}
+{% endfor %}
+{% for database in mariadb_binlog_ignore_db %}
+binlog-ignore-db = {{ database }}
+{% endfor %}
+{% for database in mariadb_replicate_do_db %}
+replicate-do-db = {{ database }}
+{% endfor %}
+{% for database in mariadb_replicate_ignore_db %}
+replicate-ignore-db = {{ database }}
+{% endfor %}

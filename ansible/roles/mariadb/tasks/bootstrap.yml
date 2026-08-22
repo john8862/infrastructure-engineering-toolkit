@@ -1,0 +1,197 @@
+---
+- name: Record that MariaDB bootstrap is in progress
+  ansible.builtin.copy:
+    dest: "{{ mariadb_bootstrap_in_progress_marker }}"
+    owner: root
+    group: root
+    mode: '0600'
+    content: |
+      MariaDB bootstrap started by Ansible.
+      host={{ inventory_hostname }}
+      server_id={{ mariadb_server_id_effective }}
+  register: mariadb_bootstrap_in_progress_result
+  when:
+    - not ansible_check_mode
+    - not mariadb_bootstrap_marker_stat.stat.exists
+    - not mariadb_bootstrap_in_progress_stat.stat.exists
+
+- name: Explain deferred MariaDB database bootstrap in check mode
+  ansible.builtin.debug:
+    msg:
+      - >-
+        CHECK MODE: MariaDB account, database, privilege, and GTID writes are
+        intentionally deferred because the root-password update and its
+        subsequent authenticated operations must be evaluated as one real
+        transaction.
+      - >-
+        The real run will reconcile the local root account, remove unmanaged
+        default accounts and the test database, and manage the reserved
+        replication account with TLS required.
+      - >-
+        RESET MASTER remains guarded by the pristine-host checks and will be
+        {{ 'requested' if mariadb_bootstrap_should_reset | bool else 'skipped' }}
+        on the real run.
+      - >-
+        The Ready-for-HA marker will be created only after those real database
+        operations complete successfully.
+  when: ansible_check_mode
+
+- name: Set the local root password and disable unix_socket authentication
+  ansible.mariadb.mariadb_user:
+    name: root
+    host: localhost
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    check_implicit_admin: true
+    password: "{{ mariadb_root_password }}"
+    plugin: mysql_native_password
+    priv: '*.*:ALL,GRANT'
+    state: present
+    update_password: always
+  register: mariadb_root_account_result
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Use the new root password for subsequent local administration
+  ansible.builtin.set_fact:
+    mariadb_admin_login_password: "{{ mariadb_root_password }}"
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Remove remote or alternate root accounts
+  ansible.mariadb.mariadb_user:
+    name: root
+    host: "{{ item }}"
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    state: absent
+  loop: >-
+    {{ mariadb_preflight_users
+       | selectattr('name', 'equalto', 'root')
+       | rejectattr('host', 'equalto', 'localhost')
+    | map(attribute='host')
+       | list }}
+  register: mariadb_remove_remote_root_accounts_result
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Remove anonymous MariaDB accounts
+  ansible.mariadb.mariadb_user:
+    name: ''
+    host_all: true
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    state: absent
+  register: mariadb_remove_anonymous_accounts_result
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Remove the default test database
+  ansible.mariadb.mariadb_db:
+    name: test
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    state: absent
+  register: mariadb_remove_test_database_result
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Remove unexpected hosts for the reserved replication account
+  ansible.mariadb.mariadb_user:
+    name: "{{ item.name }}"
+    host: "{{ item.host }}"
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    state: absent
+  loop: >-
+    {{ mariadb_preflight_users
+       | selectattr('name', 'equalto', mariadb_replication_user)
+       | rejectattr('host', 'equalto', mariadb_replication_host)
+       | list }}
+  register: mariadb_remove_replication_hosts_result
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Create the single future-topology replication account
+  ansible.mariadb.mariadb_user:
+    name: "{{ mariadb_replication_user }}"
+    host: "{{ mariadb_replication_host }}"
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    password: "{{ mariadb_replication_password }}"
+    priv: "{{ mariadb_replication_privileges }}"
+    tls_requires: "{{ mariadb_replication_tls_requires }}"
+    sql_log_bin: false
+    state: present
+    update_password: always
+  register: mariadb_replication_account_result
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Flush MariaDB privileges after account changes
+  ansible.mariadb.mariadb_query:
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    query: FLUSH PRIVILEGES
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - mariadb_root_account_result is changed
+      or mariadb_remove_remote_root_accounts_result is changed
+      or mariadb_remove_anonymous_accounts_result is changed
+      or mariadb_remove_test_database_result is changed
+      or mariadb_remove_replication_hosts_result is changed
+      or mariadb_replication_account_result is changed
+  no_log: true
+
+- name: Reset GTID/binlog state on a brand-new pristine server only
+  ansible.mariadb.mariadb_query:
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    query: RESET MASTER
+  when:
+    - not ansible_check_mode
+    - mariadb_bootstrap_should_reset | bool
+  no_log: true
+
+- name: Mark MariaDB Ready for the future HA role
+  ansible.builtin.copy:
+    dest: "{{ mariadb_bootstrap_marker }}"
+    owner: root
+    group: root
+    mode: '0600'
+    content: |
+      MariaDB baseline completed by Ansible.
+      host={{ inventory_hostname }}
+      server_id={{ mariadb_server_id_effective }}
+      report_host={{ mariadb_report_host_effective }}
+      server_version={{ mariadb_server_version }}
+      reset_master={{ mariadb_bootstrap_should_reset | bool }}
+  when:
+    - not ansible_check_mode
+    - not mariadb_bootstrap_marker_stat.stat.exists
+
+- name: Clear the interrupted bootstrap marker
+  ansible.builtin.file:
+    path: "{{ mariadb_bootstrap_in_progress_marker }}"
+    state: absent
+  when:
+    - not ansible_check_mode
+    - mariadb_bootstrap_in_progress_stat.stat.exists
+      or mariadb_bootstrap_in_progress_result.changed | default(false) | bool

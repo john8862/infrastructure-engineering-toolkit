@@ -1,0 +1,15 @@
+---
+- name: Restart MariaDB
+  ansible.builtin.service:
+    name: "{{ mariadb_service_name }}"
+    state: restarted
+  when: not ansible_check_mode
+  listen: mariadb restart
+
+- name: Explain deferred MariaDB restart in check mode
+  ansible.builtin.debug:
+    msg: >-
+      CHECK MODE: MariaDB configuration changed or would change; the
+      {{ mariadb_service_name }} service restart is deferred until a real run.
+  when: ansible_check_mode
+  listen: mariadb restart

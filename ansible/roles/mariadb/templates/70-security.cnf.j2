@@ -1,0 +1,17 @@
+# Managed by Ansible: transport and authentication hardening.
+{% if mariadb_tls_enabled | bool or (mariadb_auth_pam_enabled | bool and mariadb_auth_pam_package | default('') | length > 0) %}
+[mariadbd]
+{% if mariadb_tls_enabled | bool %}
+require-secure-transport = {{ 1 if mariadb_tls_require_secure_transport | bool else 0 }}
+ssl-cert = {{ mariadb_tls_server_certificate_link }}
+ssl-key = {{ mariadb_tls_server_private_key_link }}
+ssl-ca = {{ mariadb_tls_ca_certificate_link }}
+tls-version = {{ mariadb_tls_version }}
+{% if mariadb_tls_cipher | length > 0 %}
+ssl-cipher = {{ mariadb_tls_cipher }}
+{% endif %}
+{% endif %}
+{% if mariadb_auth_pam_enabled | bool and mariadb_auth_pam_package | default('') | length > 0 %}
+plugin-load-add = auth_pam
+{% endif %}
+{% endif %}

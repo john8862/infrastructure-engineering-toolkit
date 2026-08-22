@@ -1,0 +1,65 @@
+---
+- name: Inspect the MariaDB configuration directory
+  ansible.builtin.stat:
+    path: "{{ mariadb_config_dir }}"
+  register: mariadb_config_directory_stat
+
+- name: Inspect the MariaDB configuration parent directory
+  ansible.builtin.stat:
+    path: "{{ mariadb_config_dir | dirname }}"
+  register: mariadb_config_parent_directory_stat
+
+- name: Ensure MariaDB configuration directory exists
+  ansible.builtin.file:
+    path: "{{ mariadb_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - not ansible_check_mode
+      or mariadb_config_parent_directory_stat.stat.exists
+
+- name: Explain deferred MariaDB configuration directory in check mode
+  ansible.builtin.debug:
+    msg: >-
+      The MariaDB configuration parent directory is not present in check mode.
+      Package installation is predicted but not applied, so the configuration
+      directory and templates will be created on the real run.
+  when:
+    - ansible_check_mode
+    - not mariadb_config_parent_directory_stat.stat.exists
+
+- name: Explain deferred configuration rendering in check mode
+  ansible.builtin.debug:
+    msg: >-
+      The MariaDB configuration directory is not present in check mode.
+      Package installation is predicted but not applied, so configuration
+      templates will be rendered on the real run.
+  when:
+    - ansible_check_mode
+    - mariadb_config_parent_directory_stat.stat.exists
+    - not mariadb_config_directory_stat.stat.exists
+
+- name: Render the split MariaDB configuration files
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ mariadb_config_dir }}/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  diff: true
+  loop:
+    - { src: 50-server.cnf.j2, dest: 50-server.cnf }
+    - { src: 60-replication.cnf.j2, dest: 60-replication.cnf }
+    - { src: 70-security.cnf.j2, dest: 70-security.cnf }
+    - { src: 80-logging.cnf.j2, dest: 80-logging.cnf }
+    - { src: 90-performance.cnf.j2, dest: 90-performance.cnf }
+    - { src: 99-node.cnf.j2, dest: 99-node.cnf }
+  notify: mariadb restart
+  when:
+    - not ansible_check_mode
+      or mariadb_config_directory_stat.stat.exists
+
+- name: Apply configuration changes before database administration
+  ansible.builtin.meta: flush_handlers

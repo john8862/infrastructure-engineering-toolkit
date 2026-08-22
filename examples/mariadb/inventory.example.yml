@@ -1,0 +1,9 @@
+---
+all:
+  children:
+    mariadb:
+      hosts:
+        db-primary:
+          ansible_host: 192.0.2.10
+        db-replica-a:
+          ansible_host: 192.0.2.11

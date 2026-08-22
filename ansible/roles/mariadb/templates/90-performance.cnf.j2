@@ -1,0 +1,12 @@
+# Managed by Ansible: InnoDB production baseline.
+[mariadbd-{{ mariadb_server_version }}]
+innodb-buffer-pool-size = {{ mariadb_innodb_buffer_pool_size }}
+{% if mariadb_server_version is version('10.6', '<') %}
+innodb-buffer-pool-instances = {{ mariadb_innodb_buffer_pool_instances }}
+{% endif %}
+innodb-log-file-size = {{ mariadb_innodb_log_file_size }}
+innodb-file-per-table = {{ 1 if mariadb_innodb_file_per_table | bool else 0 }}
+innodb-flush-log-at-trx-commit = {{ mariadb_innodb_flush_log_at_trx_commit }}
+innodb-purge-threads = {{ mariadb_innodb_purge_threads }}
+innodb-flush-method = O_DIRECT
+innodb-flush-neighbors = 0
