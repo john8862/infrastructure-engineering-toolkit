@@ -35,6 +35,30 @@ GitHub Release.
    come from the same merged commit history.
 4. Confirm the tag, GitHub Release, version file, manifest, and changelog agree.
 
+## Release PR metadata
+
+Release PR bodies use a small, machine-readable envelope around the semantic
+version and release notes. Keep both horizontal rules and the version heading
+on their own lines; replace the version, date, and notes for each release.
+
+```markdown
+---
+## [0.1.0] (2026-08-22)
+
+Initial public baseline for reusable infrastructure engineering automation.
+
+### Components
+
+- Five independent Ansible role archives.
+- One separate FreeIPA bootstrap archive.
+- Deterministic manifests and SHA-256 checksums.
+
+### Validation
+
+- Shell, Python, Ansible, YAML, Markdown, and fixture checks passed.
+---
+```
+
 ## Independent release assets
 
 Every published root release includes six separately installable archives:
@@ -83,11 +107,10 @@ commit or update the Release PR instead.
 
 ## Initial release
 
-The manifest and `version.txt` start at `0.0.0` as a bookkeeping baseline, not
-as a claim that a `0.0.0` release exists. The first public release is created
-only after Release Please opens a release PR and that PR is reviewed and merged.
-The initial changelog text is intentionally not a fabricated release section;
-Release Please will add the first dated section when it prepares that PR.
+The first public baseline is `0.1.0`. The release tag, GitHub Release,
+`version.txt`, manifest, and changelog entry must all identify the same source
+tree. Subsequent releases follow the same reviewed Release PR flow and retain
+the independent role and FreeIPA asset boundaries described above.
 
 ## References
 
