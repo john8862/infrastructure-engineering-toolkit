@@ -987,6 +987,32 @@ TECHNITIUM_DNS_CLIENT_NETWORKS='192.0.2.0/24'
 TECHNITIUM_ZONE_TRANSFER_PROTOCOL=Tcp
 TECHNITIUM_SETTINGS_JSON='{"status":"ok","response":{"webServiceLocalAddresses":["0.0.0.0"],"webServiceHttpPort":55380,"webServiceEnableTls":true,"webServiceTlsPort":55443,"enableDnsOverTls":false}}'
 TECHNITIUM_DHCP_SCOPES_JSON='{"status":"ok","response":{"scopes":[]}}'
+# Keep the listener probe deterministic across developer machines and CI
+# runners.  The production check intentionally inspects the host's real
+# sockets, but this contract fixture must model the externally bound
+# Technitium endpoints explicitly rather than depending on whether `ss` is
+# installed or on unrelated sockets exposed by the runner.
+ss() {
+    case "$*" in
+        *'-lnt'*)
+            printf '%s\n' \
+                'LISTEN 0 128 0.0.0.0:55380 0.0.0.0:*' \
+                'LISTEN 0 128 0.0.0.0:55443 0.0.0.0:*' \
+                'LISTEN 0 128 0.0.0.0:8080 0.0.0.0:*' \
+                'LISTEN 0 128 0.0.0.0:8443 0.0.0.0:*' \
+                'LISTEN 0 128 0.0.0.0:8853 0.0.0.0:*'
+            ;;
+        *'-lnu'*)
+            printf '%s\n' \
+                'UNCONN 0 128 0.0.0.0:55443 0.0.0.0:*' \
+                'UNCONN 0 128 0.0.0.0:8443 0.0.0.0:*' \
+                'UNCONN 0 128 0.0.0.0:8853 0.0.0.0:*'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
 firewall_configure
 assert_true 'firewalld adds the configured Technitium Web port' grep -Fxq 'permanent:55380/tcp' "$FIREWALL_TEST_STATE"
 assert_true 'firewalld adds the primary source rich rule' grep -Fq 'permanent-rich:rule family="ipv4" source address="192.0.2.10" port port="53" protocol="tcp" accept' "$FIREWALL_TEST_STATE"
