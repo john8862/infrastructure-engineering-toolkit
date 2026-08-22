@@ -1,7 +1,8 @@
 ---
 argument_specs:
   main:
-    short_description: Manage an independent, data-driven Keepalived configuration.
+    short_description: >-
+      Manage an independent, data-driven Keepalived configuration.
     options:
       keepalived_enabled:
         type: bool

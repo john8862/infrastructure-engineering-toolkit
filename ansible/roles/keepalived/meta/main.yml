@@ -2,7 +2,8 @@
 galaxy_info:
   role_name: keepalived
   author: Infrastructure Toolkit contributors
-  description: Generic, data-driven Keepalived role for independent VRRP instances.
+  description: >-
+    Generic, data-driven Keepalived role for independent VRRP instances.
   license: MIT
   min_ansible_version: "2.15"
   platforms:

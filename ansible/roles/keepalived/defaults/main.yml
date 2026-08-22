@@ -62,7 +62,8 @@ keepalived_logrotate_create_owner: "{{ keepalived_state_log_owner }}"
 keepalived_logrotate_create_group: "{{ keepalived_state_log_group }}"
 
 keepalived_systemd_ordering_enabled: false
-keepalived_systemd_override: /etc/systemd/system/keepalived.service.d/ordering.conf
+keepalived_systemd_override: >-
+  /etc/systemd/system/keepalived.service.d/ordering.conf
 keepalived_systemd_after_units:
   - network-online.target
 keepalived_systemd_requires_units: []
