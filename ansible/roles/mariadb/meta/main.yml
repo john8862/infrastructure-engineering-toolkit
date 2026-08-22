@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  author: Community maintainers
+  description: Reusable MariaDB baseline for a configured Ubuntu target
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+  galaxy_tags:
+    - database
+    - mariadb
+    - replication
+    - tls
+    - ubuntu
+dependencies: []

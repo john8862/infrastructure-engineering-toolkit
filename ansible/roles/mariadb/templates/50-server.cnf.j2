@@ -1,0 +1,12 @@
+# Managed by Ansible: MariaDB server baseline.
+[server]
+bind-address = {{ mariadb_bind_address }}
+port = {{ mariadb_port }}
+skip-name-resolve = {{ 1 if mariadb_skip_name_resolve | bool else 0 }}
+max_connections = {{ mariadb_max_connections }}
+character-set-server = {{ mariadb_character_set_server }}
+collation-server = {{ mariadb_collation_server }}
+default-storage-engine = {{ mariadb_default_storage_engine }}
+secure-file-priv = {{ mariadb_secure_file_priv }}
+local-infile = {{ 1 if mariadb_local_infile | bool else 0 }}
+skip-symbolic-links = {{ 1 if mariadb_skip_symbolic_links | bool else 0 }}

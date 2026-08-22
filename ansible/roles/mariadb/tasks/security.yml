@@ -1,0 +1,289 @@
+---
+- name: Assert MariaDB TLS asset paths are absolute and distinct from links
+  ansible.builtin.assert:
+    that:
+      - item.source | string | length > 0
+      - item.source is match('^/')
+      - item.destination | string | length > 0
+      - item.destination is match('^/')
+      - item.source != item.destination
+    fail_msg: >-
+      TLS asset {{ item.name }} must have an absolute provider path that is
+      different from its MariaDB link path.
+  loop: "{{ mariadb_tls_asset_links }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  when:
+    - mariadb_tls_enabled | bool
+    - not ansible_check_mode
+      or (mariadb_tls_asset_inputs_complete | default(false) | bool)
+
+- name: Explain deferred TLS source validation in check mode
+  ansible.builtin.debug:
+    msg: >-
+      TLS source paths are not available in check mode. Certificate validation,
+      ACL prediction, and stable-link prediction will run when the provider
+      assets are present on the real target.
+  when:
+    - mariadb_tls_enabled | bool
+    - ansible_check_mode
+    - not (mariadb_tls_asset_inputs_complete | default(false) | bool)
+
+- name: Inspect provider-managed TLS assets
+  ansible.builtin.stat:
+    path: "{{ item.source }}"
+    follow: true
+  loop: "{{ mariadb_tls_asset_links }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: mariadb_tls_source_stats
+  no_log: true
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_asset_inputs_complete | default(false) | bool
+
+- name: Calculate whether provider-managed TLS assets are available
+  ansible.builtin.set_fact:
+    mariadb_tls_assets_available: >-
+      {{ (mariadb_tls_source_stats.results | default([])
+          | selectattr('stat.exists', 'defined')
+          | selectattr('stat.exists')
+          | selectattr('stat.isreg', 'defined')
+          | selectattr('stat.isreg')
+          | list
+          | length) == (mariadb_tls_asset_links | length) }}
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_asset_inputs_complete | default(false) | bool
+  no_log: true
+
+- name: Assert provider-managed TLS assets are regular files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: >-
+      Required MariaDB TLS asset {{ item.item.name }} is missing or not a
+      regular file.
+  loop: "{{ mariadb_tls_source_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  no_log: true
+  when:
+    - mariadb_tls_enabled | bool
+    - not ansible_check_mode
+      or (mariadb_tls_assets_available | default(false) | bool)
+
+- name: Explain deferred TLS convergence in check mode
+  ansible.builtin.debug:
+    msg: >-
+      One or more provider-managed TLS assets are not present in check mode.
+      The role will predict TLS filesystem changes after the provider has
+      published the assets.
+  when:
+    - mariadb_tls_enabled | bool
+    - ansible_check_mode
+    - not (mariadb_tls_assets_available | default(false) | bool)
+
+- name: Inspect the MariaDB SSL directory parent
+  ansible.builtin.stat:
+    path: "{{ mariadb_ssl_directory | dirname }}"
+  register: mariadb_ssl_parent_directory_stat
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_assets_available | default(false) | bool
+
+- name: Ensure MariaDB-owned SSL directory exists
+  ansible.builtin.file:
+    path: "{{ mariadb_ssl_directory }}"
+    state: directory
+    owner: "{{ mariadb_ssl_directory_owner }}"
+    group: "{{ mariadb_ssl_directory_group }}"
+    mode: "{{ mariadb_ssl_directory_mode }}"
+  when:
+    - mariadb_tls_enabled | bool
+    - not ansible_check_mode
+      or (mariadb_tls_assets_available | default(false) | bool)
+    - not ansible_check_mode
+      or mariadb_ssl_parent_directory_stat.stat.exists | default(false) | bool
+
+- name: Explain deferred MariaDB SSL directory in check mode
+  ansible.builtin.debug:
+    msg: >-
+      The MariaDB SSL directory parent is not present in check mode. Package
+      installation is predicted but not applied, so the stable TLS directory,
+      ACL, and links will be created on the real run.
+  when:
+    - mariadb_tls_enabled | bool
+    - ansible_check_mode
+    - mariadb_tls_assets_available | default(false) | bool
+    - not mariadb_ssl_parent_directory_stat.stat.exists
+
+- name: Inspect the MariaDB-owned SSL directory
+  ansible.builtin.stat:
+    path: "{{ mariadb_ssl_directory }}"
+    follow: false
+  register: mariadb_ssl_directory_stat
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_assets_available | default(false) | bool
+
+- name: Inspect the mysql service account for TLS ACLs
+  ansible.builtin.command:
+    argv:
+      - id
+      - -u
+      - mysql
+  register: mariadb_mysql_account_check
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  no_log: true
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_assets_available | default(false) | bool
+
+- name: Assert the mysql service account exists for TLS ACLs
+  ansible.builtin.assert:
+    that:
+      - mariadb_mysql_account_check.rc == 0
+    fail_msg: >-
+      The mysql service account is required before MariaDB TLS ACLs can be
+      applied.
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_assets_available | default(false) | bool
+    - not ansible_check_mode
+
+- name: Grant mysql traversal ACL on the MariaDB SSL directory
+  ansible.posix.acl:
+    path: "{{ mariadb_ssl_directory }}"
+    entity: mysql
+    etype: user
+    permissions: x
+    state: present
+    follow: false
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_assets_available | default(false) | bool
+    - mariadb_mysql_account_check.rc | default(1) | int == 0
+    - not ansible_check_mode
+      or mariadb_ssl_directory_stat.stat.exists | default(false) | bool
+
+- name: Inspect existing MariaDB TLS link destinations
+  ansible.builtin.stat:
+    path: "{{ item.destination }}"
+    follow: false
+  loop: "{{ mariadb_tls_asset_links }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: mariadb_tls_destination_stats
+  no_log: true
+  when:
+    - mariadb_tls_enabled | bool
+    - not ansible_check_mode
+      or (mariadb_tls_assets_available | default(false) | bool)
+
+- name: Refuse to replace non-link MariaDB TLS destinations
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or item.stat.islnk
+    fail_msg: >-
+      MariaDB TLS destination {{ item.item.destination }} exists and is not a
+      symbolic link. Move it deliberately before enabling the role.
+  loop: "{{ mariadb_tls_destination_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  no_log: true
+  when:
+    - mariadb_tls_enabled | bool
+    - not ansible_check_mode
+      or (mariadb_tls_assets_available | default(false) | bool)
+
+- name: Grant mysql traversal ACL on provider TLS directories
+  ansible.posix.acl:
+    path: "{{ item }}"
+    entity: mysql
+    etype: user
+    permissions: x
+    state: present
+    follow: true
+  loop: >-
+    {{ mariadb_tls_asset_links
+       | map(attribute='source')
+       | map('dirname')
+       | unique
+       | list }}
+  no_log: true
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_assets_available | default(false) | bool
+    - mariadb_mysql_account_check.rc | default(1) | int == 0
+    - item not in ['', '.', '/']
+
+- name: Grant mysql read ACL on provider TLS assets
+  ansible.posix.acl:
+    path: "{{ item }}"
+    entity: mysql
+    etype: user
+    permissions: r
+    state: present
+    follow: true
+  loop: >-
+    {{ mariadb_tls_asset_links
+       | map(attribute='source')
+       | unique
+       | list }}
+  no_log: true
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_assets_available | default(false) | bool
+    - mariadb_mysql_account_check.rc | default(1) | int == 0
+
+- name: Create stable MariaDB TLS links
+  ansible.builtin.file:
+    src: "{{ item.source }}"
+    dest: "{{ item.destination }}"
+    state: link
+    force: true
+    follow: false
+  loop: "{{ mariadb_tls_asset_links }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_assets_available | default(false) | bool
+    - not ansible_check_mode
+      or mariadb_ssl_directory_stat.stat.exists | default(false) | bool
+
+- name: Inspect managed MariaDB TLS links when TLS is disabled
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ mariadb_tls_asset_links | map(attribute='destination') | list }}"
+  register: mariadb_tls_disabled_link_stats
+  no_log: true
+  when: not (mariadb_tls_enabled | bool)
+
+- name: Remove managed MariaDB TLS links when TLS is disabled
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: absent
+  loop: "{{ mariadb_tls_disabled_link_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - not (mariadb_tls_enabled | bool)
+    - item.stat.islnk | default(false) | bool
+
+- name: Publish stable MariaDB TLS runtime paths
+  ansible.builtin.set_fact:
+    mariadb_tls_runtime_paths:
+      ca_certificate: "{{ mariadb_tls_ca_certificate_link }}"
+      certificate: "{{ mariadb_tls_server_certificate_link }}"
+      private_key: "{{ mariadb_tls_server_private_key_link }}"
+  when:
+    - mariadb_tls_enabled | bool
+    - mariadb_tls_assets_available | default(false) | bool

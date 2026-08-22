@@ -1,0 +1,84 @@
+---
+- name: Validate MariaDB role inputs
+  ansible.builtin.import_tasks: assertions.yml
+  when: mariadb_enabled | bool
+  tags:
+    - validate
+
+- name: Configure the official MariaDB repository
+  ansible.builtin.import_tasks: repository.yml
+  when: mariadb_enabled | bool
+  tags:
+    - install
+
+- name: Install MariaDB and operational packages
+  ansible.builtin.import_tasks: install.yml
+  when: mariadb_enabled | bool
+  tags:
+    - install
+
+- name: Start MariaDB before database initialization
+  ansible.builtin.import_tasks: service.yml
+  when: mariadb_enabled | bool
+  tags:
+    - install
+    - configure
+
+- name: Inspect the existing MariaDB state
+  ansible.builtin.import_tasks: preflight.yml
+  when:
+    - mariadb_enabled | bool
+    - mariadb_check_runtime_available | default(true) | bool
+  tags:
+    - configure
+    - healthcheck
+    - validate
+
+- name: Prepare MariaDB TLS assets without changing provider ownership
+  ansible.builtin.import_tasks: security.yml
+  when: mariadb_enabled | bool
+  tags:
+    - configure
+
+- name: Render the split MariaDB configuration
+  ansible.builtin.import_tasks: configure.yml
+  when: mariadb_enabled | bool
+  tags:
+    - configure
+
+- name: Initialize MariaDB accounts and guarded GTID state
+  ansible.builtin.import_tasks: bootstrap.yml
+  when:
+    - mariadb_enabled | bool
+    - mariadb_check_runtime_available | default(true) | bool
+    - not (mariadb_bootstrap_skip | default(false) | bool)
+  tags:
+    - configure
+
+- name: Verify the MariaDB Ready-for-HA contract
+  ansible.builtin.import_tasks: verify.yml
+  when:
+    - mariadb_enabled | bool
+    - mariadb_check_runtime_available | default(true) | bool
+    - mariadb_bootstrap_require_ready_for_ha | bool
+    - not (mariadb_bootstrap_skip | default(false) | bool)
+    - not ansible_check_mode
+  tags:
+    - healthcheck
+    - validate
+
+- name: Explain skipped check-mode runtime verification
+  ansible.builtin.debug:
+    msg: >-
+      MariaDB Ready-for-HA runtime verification is skipped in check mode
+      because configuration, service restarts, and database bootstrap writes
+      are not applied. Read-only Pre-checks still run; execute the role without
+      --check to validate the resulting runtime state.
+  when:
+    - mariadb_enabled | bool
+    - ansible_check_mode
+    - mariadb_bootstrap_require_ready_for_ha | bool
+    - not (mariadb_bootstrap_skip | default(false) | bool)
+  tags:
+    - healthcheck
+    - validate

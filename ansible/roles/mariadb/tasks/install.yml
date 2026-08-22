@@ -1,0 +1,61 @@
+---
+- name: Build the MariaDB package set
+  ansible.builtin.set_fact:
+    mariadb_package_list: >-
+      {{ mariadb_repository_prerequisite_packages
+         + mariadb_system_packages
+         + mariadb_server_packages
+         + ([mariadb_auth_pam_package] if (mariadb_auth_pam_enabled | bool and mariadb_auth_pam_package | default('') | length > 0) else [])
+         + (mariadb_future_ha_packages if mariadb_install_future_ha_packages | bool else []) }}
+
+- name: Install MariaDB and operational packages
+  ansible.builtin.apt:
+    name: "{{ mariadb_package_list }}"
+    state: "{{ mariadb_package_state }}"
+    update_cache: true
+    cache_valid_time: "{{ mariadb_apt_update_cache_valid_time }}"
+
+- name: Inspect the MariaDB service account for check mode
+  ansible.builtin.command:
+    argv:
+      - id
+      - -u
+      - mysql
+  register: mariadb_service_account_check
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  no_log: true
+  when: ansible_check_mode
+
+- name: Explain deferred MariaDB-owned directories in check mode
+  ansible.builtin.debug:
+    msg: >-
+      The mysql service account is not present yet. Package installation is
+      predicted but not applied in check mode, so MariaDB-owned log and secure
+      file directories will be created during the real run.
+  when:
+    - ansible_check_mode
+    - mariadb_service_account_check.rc | default(1) | int != 0
+
+- name: Create MariaDB log directory
+  ansible.builtin.file:
+    path: "{{ mariadb_log_dir }}"
+    state: directory
+    owner: mysql
+    group: adm
+    mode: '0750'
+  when:
+    - not ansible_check_mode
+      or mariadb_service_account_check.rc | default(1) | int == 0
+
+- name: Create MariaDB secure file directory
+  ansible.builtin.file:
+    path: "{{ mariadb_secure_file_priv }}"
+    state: directory
+    owner: mysql
+    group: mysql
+    mode: '0700'
+  when:
+    - not ansible_check_mode
+      or mariadb_service_account_check.rc | default(1) | int == 0

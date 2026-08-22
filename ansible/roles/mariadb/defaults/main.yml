@@ -1,0 +1,227 @@
+---
+# Generic, safe defaults. Site-specific values belong in inventory, and
+# credentials must be supplied from Ansible Vault.
+mariadb_enabled: true
+
+# A MariaDB release series resolves to the latest patch in that series from
+# the official repository. Override this in inventory to select another
+# series, then validate the role's templates and settings for that series.
+mariadb_server_version: "11.8"
+mariadb_repository_version: "{{ mariadb_server_version }}"
+
+# The role targets Ubuntu. Keep the expected version and codename explicit so
+# a host cannot silently use a different distribution release or APT suite.
+mariadb_target_distribution: Ubuntu
+mariadb_target_distribution_version: "24.04"
+mariadb_target_distribution_release: noble
+mariadb_repository_distribution: "{{ mariadb_target_distribution_release }}"
+mariadb_repository_component: main
+mariadb_repository_base_url: "https://deb.mariadb.org/{{ mariadb_repository_version }}/ubuntu"
+mariadb_repository_keyring_url: "https://supplychain.mariadb.com/mariadb-keyring-2019.gpg"
+mariadb_repository_keyring_path: /etc/apt/keyrings/mariadb-keyring.gpg
+mariadb_repository_key_fingerprint: 177F4010FE56CA3336300305F1656F24C74CD1D8
+mariadb_repository_keyring_checksum: ""
+mariadb_repository_pin_path: /etc/apt/preferences.d/mariadb
+mariadb_repository_pin_priority: 1001
+mariadb_apt_update_cache_valid_time: 3600
+
+mariadb_repository_prerequisite_packages:
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - python3-debian
+
+mariadb_system_packages:
+  - acl
+  - libdbd-mysql-perl
+  - libdbi-perl
+  - pigz
+  - pv
+  - python3-pymysql
+  - rsync
+  - socat
+  - procps
+  - lsof
+
+mariadb_server_packages:
+  - mariadb-server
+  - mariadb-client
+  - mariadb-backup
+
+# The PAM package name varies between MariaDB distributions. The role chooses
+# the first candidate advertised by the configured official repository.
+mariadb_auth_pam_enabled: true
+mariadb_auth_pam_required: false
+mariadb_auth_pam_package_candidates:
+  - mariadb-plugin-auth-pam
+  - mariadb-server-plugin-auth-pam
+
+# Reserved for a later HA/data-plane role. This role does not configure
+# Galera, MaxScale, or any replication topology.
+mariadb_install_future_ha_packages: false
+mariadb_future_ha_packages: []
+# Installing an absent package uses the repository candidate; existing
+# installations are not upgraded implicitly by a normal convergence run.
+mariadb_package_state: present
+
+# Service and filesystem layout.
+mariadb_service_name: mariadb
+mariadb_config_dir: /etc/mysql/mariadb.conf.d
+mariadb_data_dir: /var/lib/mysql
+mariadb_run_dir: /run/mysqld
+mariadb_socket: /run/mysqld/mysqld.sock
+mariadb_port: 3306
+mariadb_log_dir: /var/log/mysql
+mariadb_error_log: /var/log/mysql/error.log
+mariadb_slow_query_log_file: /var/log/mysql/mariadb-slow.log
+mariadb_secure_file_priv: /var/lib/mysql-files
+mariadb_binlog_basename: /var/log/mysql/mariadb-bin
+mariadb_relay_log_basename: /var/log/mysql/mariadb-relay-bin
+mariadb_log_basename: mariadb
+
+# Node identity. If mariadb_server_id is unset, the role derives a stable ID
+# from inventory group order and this offset.
+mariadb_inventory_group: mariadb
+mariadb_server_id: null
+mariadb_server_id_offset: 1000
+mariadb_report_host: ""
+
+# Baseline network and SQL behaviour.
+mariadb_bind_address: 0.0.0.0
+mariadb_skip_name_resolve: true
+mariadb_max_connections: 300
+mariadb_character_set_server: utf8mb4
+mariadb_collation_server: utf8mb4_uca1400_ai_ci
+mariadb_default_storage_engine: InnoDB
+
+# GTID/binlog baseline. This role prepares a clean standalone node; it never
+# points a server at a source or starts a replica.
+mariadb_gtid_domain_id: 1
+mariadb_gtid_strict_mode: true
+mariadb_log_bin: true
+mariadb_binlog_format: ROW
+mariadb_binlog_row_image: FULL
+mariadb_sync_binlog: 1
+mariadb_sync_relay_log: 1
+mariadb_sync_relay_log_info: 1
+mariadb_sync_master_info: 1
+mariadb_expire_logs_days: 7
+mariadb_max_binlog_size: 100M
+mariadb_log_slave_updates: true
+mariadb_relay_log_recovery: true
+mariadb_relay_log_purge: true
+mariadb_slave_parallel_mode: optimistic
+mariadb_slave_parallel_threads: 8
+mariadb_slave_connections_needed_for_purge: 0
+mariadb_skip_slave_start: true
+
+# Replication filters are deliberately empty. Populate them only when the
+# future HA design explicitly requires filtering; all databases replicate by
+# default.
+mariadb_binlog_do_db: []
+mariadb_binlog_ignore_db: []
+mariadb_replicate_do_db: []
+mariadb_replicate_ignore_db: []
+
+# Security baseline.
+mariadb_local_infile: false
+mariadb_skip_symbolic_links: true
+# TLS is enabled by default for backwards compatibility, but the complete
+# TLS path is optional. When disabled, this role omits TLS configuration,
+# certificate links, and ACL changes.
+mariadb_tls_enabled: true
+mariadb_tls_require_secure_transport: true
+mariadb_tls_version: TLSv1.2,TLSv1.3
+mariadb_tls_cipher: ""
+# Consumer-facing source interface. A certificate provider owns these files;
+# MariaDB validates and links them but never manages their lifecycle.
+mariadb_tls_certificate:
+  certificate: ""
+  private_key: ""
+  ca_certificate: ""
+
+# MariaDB-owned stable TLS layout. Server configuration references only these
+# links, never provider-managed certificate paths.
+mariadb_ssl_directory: /etc/mysql/ssl
+mariadb_ssl_directory_owner: root
+mariadb_ssl_directory_group: root
+mariadb_ssl_directory_mode: '0750'
+mariadb_tls_ca_certificate_link: "{{ mariadb_ssl_directory }}/ca.pem"
+mariadb_tls_server_certificate_link: "{{ mariadb_ssl_directory }}/server-cert.pem"
+mariadb_tls_server_private_key_link: "{{ mariadb_ssl_directory }}/server-key.pem"
+
+# MariaDB has one TLS consumer interface. The reserved replication account
+# requires encrypted transport but does not need a second certificate or a
+# second set of filesystem links. Future HA roles should consume these same
+# server TLS paths when they need the node's TLS material.
+mariadb_tls_asset_links:
+  - name: server_ca
+    source: >-
+      {{ (mariadb_tls_certificate | default({})).get('ca_certificate', '') }}
+    destination: "{{ mariadb_tls_ca_certificate_link }}"
+  - name: server_certificate
+    source: >-
+      {{ (mariadb_tls_certificate | default({})).get('certificate', '') }}
+    destination: "{{ mariadb_tls_server_certificate_link }}"
+  - name: server_private_key
+    source: >-
+      {{ (mariadb_tls_certificate | default({})).get('private_key', '') }}
+    destination: "{{ mariadb_tls_server_private_key_link }}"
+
+# General logging remains disabled by default because it can expose
+# credentials and materially affect production performance.
+mariadb_log_output: FILE
+mariadb_general_log: false
+mariadb_slow_query_log: true
+mariadb_long_query_time: 1
+mariadb_log_slow_query_file: "{{ mariadb_slow_query_log_file }}"
+mariadb_log_slow_query_time: "{{ mariadb_long_query_time }}"
+mariadb_log_slow_admin_statements: true
+mariadb_log_slow_slave_statements: true
+
+# MariaDB 10.6 and newer removed innodb_buffer_pool_instances; the template
+# omits that obsolete setting for current supported release series.
+mariadb_innodb_buffer_pool_size: 8G
+mariadb_innodb_buffer_pool_instances: 8
+mariadb_innodb_log_file_size: 512M
+mariadb_innodb_file_per_table: true
+mariadb_innodb_flush_log_at_trx_commit: 1
+mariadb_innodb_purge_threads: 8
+
+# This role intentionally creates only root and one future-topology account.
+mariadb_root_password: ""
+mariadb_replication_user: replication
+mariadb_replication_host: "%"
+mariadb_replication_password: ""
+mariadb_replication_privileges: "*.*:REPLICATION SLAVE"
+# Account policy only. This does not create replication-specific certificate
+# paths; the account uses the server's TLS configuration for encrypted login.
+mariadb_replication_tls_requires:
+  SSL: null
+
+# Safe bootstrap contract.
+mariadb_bootstrap_new_server: false
+mariadb_bootstrap_reset_master: false
+mariadb_bootstrap_existing_host_mode: fail
+mariadb_bootstrap_marker: /etc/mysql/.ansible-mariadb-ready
+mariadb_bootstrap_in_progress_marker: /etc/mysql/.ansible-mariadb-bootstrap-in-progress
+mariadb_bootstrap_require_ready_for_ha: true
+mariadb_bootstrap_system_databases:
+  - information_schema
+  - mysql
+  - performance_schema
+  - sys
+mariadb_bootstrap_system_users:
+  - root
+  - mariadb.sys
+  - mysql
+  - mysql.infoschema
+  - mysql.session
+  - mysql.sys
+  - PUBLIC
+  - ''
+  - replication
+
+# Local administrative connection tuning.
+mariadb_admin_login_user: root
+mariadb_admin_connect_timeout: 30

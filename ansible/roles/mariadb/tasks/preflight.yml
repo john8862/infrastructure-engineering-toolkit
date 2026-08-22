@@ -1,0 +1,165 @@
+---
+- name: Read bootstrap completion marker
+  ansible.builtin.stat:
+    path: "{{ mariadb_bootstrap_marker }}"
+  register: mariadb_bootstrap_marker_stat
+
+- name: Read interrupted bootstrap marker
+  ansible.builtin.stat:
+    path: "{{ mariadb_bootstrap_in_progress_marker }}"
+  register: mariadb_bootstrap_in_progress_stat
+
+- name: Probe MariaDB through the local socket without a password
+  ansible.mariadb.mariadb_info:
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    filter:
+      - version
+      - databases
+      - users_info
+      - settings
+      - slave_status
+    return_empty_dbs: true
+  register: mariadb_preflight_socket_info
+  failed_when: false
+  no_log: true
+
+- name: Probe MariaDB through the local socket with the Vault password
+  ansible.mariadb.mariadb_info:
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_root_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    filter:
+      - version
+      - databases
+      - users_info
+      - settings
+      - slave_status
+    return_empty_dbs: true
+  register: mariadb_preflight_password_info
+  failed_when: false
+  no_log: true
+  when:
+    - mariadb_preflight_socket_info.databases is not defined
+
+- name: Select the working MariaDB administrative connection
+  ansible.builtin.set_fact:
+    mariadb_preflight_info: >-
+      {{ mariadb_preflight_socket_info if mariadb_preflight_socket_info.databases is defined
+         else mariadb_preflight_password_info }}
+    mariadb_admin_login_password: >-
+      {{ '' if mariadb_preflight_socket_info.databases is defined else mariadb_root_password }}
+  no_log: true
+
+- name: Assert MariaDB is reachable before initialization
+  ansible.builtin.assert:
+    that:
+      - mariadb_preflight_info.databases is defined
+    fail_msg: >-
+      MariaDB is not reachable through {{ mariadb_socket }} with either local
+      implicit-root authentication or the supplied Vault root password.
+
+- name: Read the preflight server state
+  ansible.mariadb.mariadb_query:
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_socket }}"
+    connect_timeout: "{{ mariadb_admin_connect_timeout }}"
+    query:
+      - >-
+        SELECT @@global.gtid_slave_pos AS gtid_slave_pos,
+        @@global.gtid_binlog_pos AS gtid_binlog_pos,
+        @@global.server_id AS server_id,
+        @@global.gtid_domain_id AS gtid_domain_id,
+        @@global.log_bin AS log_bin,
+        @@global.gtid_strict_mode AS gtid_strict_mode,
+        @@global.require_secure_transport AS require_secure_transport
+  register: mariadb_preflight_query
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Normalize preflight database and account lists
+  ansible.builtin.set_fact:
+    mariadb_preflight_databases: "{{ (mariadb_preflight_info.databases | default({})).keys() | list }}"
+    mariadb_preflight_users: "{{ mariadb_preflight_info.users_info | default([]) }}"
+    mariadb_preflight_state: "{{ mariadb_preflight_query.query_result[0][0] | default({}) }}"
+  no_log: true
+
+- name: Calculate whether the host is pristine enough for a guarded reset
+  ansible.builtin.set_fact:
+    mariadb_non_system_databases: >-
+      {{ mariadb_preflight_databases | difference(mariadb_bootstrap_system_databases) }}
+    mariadb_non_bootstrap_users: >-
+      {{ mariadb_preflight_users
+         | rejectattr('name', 'in', mariadb_bootstrap_system_users)
+         | list }}
+    mariadb_bootstrap_pristine: >-
+      {{ (mariadb_preflight_databases | difference(mariadb_bootstrap_system_databases) | length == 0)
+         and (mariadb_preflight_users
+              | rejectattr('name', 'in', mariadb_bootstrap_system_users)
+              | list | length == 0)
+         and (mariadb_preflight_state.gtid_slave_pos | default('') | string | length == 0)
+         and (mariadb_preflight_state.gtid_binlog_pos | default('') | string | length == 0)
+         and ((mariadb_preflight_info.slave_status | default({})) | length == 0) }}
+  no_log: true
+
+- name: Refuse an unmarked non-pristine host unless explicitly instructed
+  ansible.builtin.assert:
+    that:
+      - mariadb_bootstrap_marker_stat.stat.exists
+        or mariadb_bootstrap_pristine
+        or mariadb_bootstrap_existing_host_mode == 'skip'
+    fail_msg: >-
+      This MariaDB host is not pristine and has no managed-ready marker. The
+      role will not reset or reinterpret an existing server. Set
+      mariadb_bootstrap_existing_host_mode=skip only after reviewing the host.
+  when: not mariadb_bootstrap_marker_stat.stat.exists
+
+- name: Refuse a requested new-server reset on a non-pristine host
+  ansible.builtin.assert:
+    that: mariadb_bootstrap_pristine
+    fail_msg: >-
+      mariadb_bootstrap_new_server=true was requested, but the host has
+      application databases, unexpected accounts, GTID state, or replication
+      state. RESET MASTER is intentionally refused.
+  when:
+    - mariadb_bootstrap_new_server | bool
+    - not mariadb_bootstrap_marker_stat.stat.exists
+
+- name: Calculate whether RESET MASTER is explicitly and safely allowed
+  ansible.builtin.set_fact:
+    mariadb_bootstrap_should_reset: >-
+      {{ (not mariadb_bootstrap_marker_stat.stat.exists)
+         and mariadb_bootstrap_new_server | bool
+         and mariadb_bootstrap_reset_master | bool
+         and mariadb_bootstrap_pristine }}
+  no_log: true
+
+- name: Set the explicit existing-host skip mode
+  ansible.builtin.set_fact:
+    mariadb_bootstrap_skip: >-
+      {{ (not mariadb_bootstrap_marker_stat.stat.exists)
+         and not mariadb_bootstrap_pristine
+         and mariadb_bootstrap_existing_host_mode == 'skip' }}
+  no_log: true
+
+- name: Refuse skip mode when a new-server reset was requested
+  ansible.builtin.assert:
+    that:
+      - not mariadb_bootstrap_skip | bool
+    fail_msg: >-
+      mariadb_bootstrap_new_server=true cannot be combined with
+      mariadb_bootstrap_existing_host_mode=skip.
+  when: mariadb_bootstrap_new_server | bool
+
+- name: Explain that account bootstrap and HA readiness are skipped
+  ansible.builtin.debug:
+    msg: >-
+      Existing-host skip mode is active. MariaDB configuration and TLS
+      link/ACL preparation continue, but account cleanup, replication-user
+      management, RESET MASTER, and the Ready-for-HA marker are intentionally
+      skipped.
+  when: mariadb_bootstrap_skip | bool

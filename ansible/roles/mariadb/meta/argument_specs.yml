@@ -1,0 +1,71 @@
+---
+argument_specs:
+  main:
+    short_description: Install and harden a standalone MariaDB node.
+    description:
+      - Installs MariaDB from the official MariaDB APT repository.
+      - Configures a TLS-capable, GTID/binlog-ready standalone node.
+      - Does not configure replication topology or application accounts.
+    options:
+      mariadb_enabled:
+        type: bool
+        default: true
+      mariadb_server_version:
+        type: str
+        default: "11.8"
+      mariadb_repository_version:
+        type: str
+        default: "{{ mariadb_server_version }}"
+      mariadb_target_distribution:
+        type: str
+        default: Ubuntu
+      mariadb_target_distribution_version:
+        type: str
+        default: "24.04"
+      mariadb_target_distribution_release:
+        type: str
+        default: noble
+      mariadb_repository_distribution:
+        type: str
+        default: "{{ mariadb_target_distribution_release }}"
+      mariadb_root_password:
+        type: str
+        no_log: true
+      mariadb_replication_password:
+        type: str
+        no_log: true
+      mariadb_server_id:
+        type: raw
+      mariadb_tls_certificate:
+        type: dict
+      mariadb_tls_enabled:
+        type: bool
+        default: true
+      mariadb_ssl_directory:
+        type: path
+        default: /etc/mysql/ssl
+      mariadb_tls_ca_certificate_link:
+        type: path
+      mariadb_tls_server_certificate_link:
+        type: path
+      mariadb_tls_server_private_key_link:
+        type: path
+      mariadb_replication_tls_requires:
+        type: dict
+        default:
+          SSL: null
+      mariadb_bootstrap_new_server:
+        type: bool
+        default: false
+      mariadb_bootstrap_reset_master:
+        type: bool
+        default: false
+      mariadb_bootstrap_existing_host_mode:
+        type: str
+        default: fail
+        choices:
+          - fail
+          - skip
+      mariadb_bootstrap_require_ready_for_ha:
+        type: bool
+        default: true

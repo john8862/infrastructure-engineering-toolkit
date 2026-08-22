@@ -1,0 +1,11 @@
+# Managed by Ansible: durable, bounded logging.
+[mariadbd]
+log-error = {{ mariadb_error_log }}
+log-output = {{ mariadb_log_output }}
+general-log = {{ 1 if mariadb_general_log | bool else 0 }}
+general-log-file = {{ mariadb_log_dir }}/{{ mariadb_log_basename }}.log
+log-slow-query = {{ 1 if mariadb_slow_query_log | bool else 0 }}
+log-slow-query-file = {{ mariadb_log_slow_query_file }}
+log-slow-query-time = {{ mariadb_log_slow_query_time }}
+log-slow-admin-statements = {{ 1 if mariadb_log_slow_admin_statements | bool else 0 }}
+log-slow-slave-statements = {{ 1 if mariadb_log_slow_slave_statements | bool else 0 }}

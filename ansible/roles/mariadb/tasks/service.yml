@@ -1,0 +1,46 @@
+---
+- name: Inspect installed services for check mode
+  ansible.builtin.service_facts:
+  check_mode: false
+  when: ansible_check_mode
+
+- name: Enable and start MariaDB
+  ansible.builtin.service:
+    name: "{{ mariadb_service_name }}"
+    enabled: true
+    state: started
+  when:
+    - not ansible_check_mode
+      or mariadb_service_name in (ansible_facts.services | default({}))
+      or (mariadb_service_name ~ '.service') in (ansible_facts.services | default({}))
+
+- name: Inspect the MariaDB administrative socket for check mode
+  ansible.builtin.stat:
+    path: "{{ mariadb_socket }}"
+  register: mariadb_socket_check
+
+- name: Wait for the MariaDB administrative socket
+  ansible.builtin.wait_for:
+    path: "{{ mariadb_socket }}"
+    state: present
+    timeout: 60
+  check_mode: false
+  when:
+    - not ansible_check_mode
+      or mariadb_socket_check.stat.exists
+
+- name: Publish MariaDB runtime availability
+  ansible.builtin.set_fact:
+    mariadb_check_runtime_available: >-
+      {{ (not ansible_check_mode) or mariadb_socket_check.stat.exists }}
+  no_log: true
+
+- name: Explain deferred MariaDB runtime checks in check mode
+  ansible.builtin.debug:
+    msg: >-
+      MariaDB is not running in check mode, so database preflight, bootstrap,
+      and final runtime verification are skipped. Filesystem and configuration
+      predictions continue where their target paths are available.
+  when:
+    - ansible_check_mode
+    - not mariadb_socket_check.stat.exists

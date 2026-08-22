@@ -1,0 +1,270 @@
+---
+- name: Install APT repository prerequisites
+  ansible.builtin.apt:
+    name: "{{ mariadb_repository_prerequisite_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ mariadb_apt_update_cache_valid_time }}"
+
+- name: Create the dedicated APT keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Inspect the APT keyring directory
+  ansible.builtin.stat:
+    path: "{{ mariadb_repository_keyring_path | dirname }}"
+  register: mariadb_repository_keyring_directory_stat
+
+- name: Inspect the existing MariaDB repository keyring
+  ansible.builtin.stat:
+    path: "{{ mariadb_repository_keyring_path }}"
+  register: mariadb_repository_keyring_stat
+
+- name: Install the official MariaDB repository keyring
+  ansible.builtin.get_url:
+    url: "{{ mariadb_repository_keyring_url }}"
+    dest: "{{ mariadb_repository_keyring_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+    force: false
+    checksum: "{{ mariadb_repository_keyring_checksum | default(omit, true) }}"
+  when:
+    - not ansible_check_mode
+      or (
+        mariadb_repository_keyring_directory_stat.stat.exists
+        and not mariadb_repository_keyring_stat.stat.exists
+      )
+
+- name: Inspect GnuPG availability for check mode
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --version
+  register: mariadb_gpg_check
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  no_log: true
+  when: ansible_check_mode
+
+- name: Read the MariaDB repository key fingerprint
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --batch
+      - --show-keys
+      - --with-colons
+      - "{{ mariadb_repository_keyring_path }}"
+  register: mariadb_repository_key_details
+  changed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - not ansible_check_mode
+      or (
+        mariadb_repository_keyring_stat.stat.exists
+        and mariadb_gpg_check.rc | default(0) | int == 0
+      )
+
+- name: Assert the expected MariaDB repository key is installed
+  ansible.builtin.assert:
+    that:
+      - mariadb_repository_key_details.rc == 0
+      - mariadb_repository_key_fingerprint in mariadb_repository_key_details.stdout
+    fail_msg: >-
+      The downloaded MariaDB keyring did not contain the expected official key
+      fingerprint {{ mariadb_repository_key_fingerprint }}.
+  no_log: true
+  when:
+    - not ansible_check_mode
+      or (
+        mariadb_repository_keyring_stat.stat.exists
+        and mariadb_gpg_check.rc | default(0) | int == 0
+      )
+
+- name: Explain deferred keyring validation in check mode
+  ansible.builtin.debug:
+    msg: >-
+      The MariaDB repository keyring is absent. Check mode predicts its
+      download and defers fingerprint validation until a real run.
+  when:
+    - ansible_check_mode
+    - mariadb_repository_keyring_directory_stat.stat.exists
+    - not mariadb_repository_keyring_stat.stat.exists
+
+- name: Explain deferred keyring download in check mode
+  ansible.builtin.debug:
+    msg: >-
+      The APT keyring directory is absent. Check mode predicts its creation and
+      defers the keyring download until a real run creates the parent path.
+  when:
+    - ansible_check_mode
+    - not mariadb_repository_keyring_directory_stat.stat.exists
+
+- name: Explain deferred keyring fingerprint validation in check mode
+  ansible.builtin.debug:
+    msg: >-
+      GnuPG is not available in check mode. The prerequisite package is
+      predicted for installation, so repository key fingerprint validation is
+      deferred until the real run.
+  when:
+    - ansible_check_mode
+    - mariadb_repository_keyring_directory_stat.stat.exists
+    - mariadb_repository_keyring_stat.stat.exists
+    - mariadb_gpg_check.rc | default(1) | int != 0
+
+- name: Inspect Python deb822 support for check mode
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_facts.python.executable | default('/usr/bin/python3') }}"
+      - -c
+      - import debian
+  register: mariadb_python_debian_check
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  no_log: true
+  when: ansible_check_mode
+
+- name: Configure the official MariaDB APT repository
+  ansible.builtin.deb822_repository:
+    name: mariadb
+    types: deb
+    uris: "{{ mariadb_repository_base_url }}"
+    suites: "{{ mariadb_repository_distribution }}"
+    components:
+      - "{{ mariadb_repository_component }}"
+    signed_by: "{{ mariadb_repository_keyring_path }}"
+    enabled: true
+    state: present
+  register: mariadb_repository_definition_result
+  when:
+    - not ansible_check_mode
+      or mariadb_python_debian_check.rc | default(1) | int == 0
+
+- name: Explain deferred APT repository declaration in check mode
+  ansible.builtin.debug:
+    msg: >-
+      python3-debian is not available in check mode. The package is included
+      in the MariaDB repository prerequisites and the official repository
+      declaration will run after a real install makes the module dependency
+      available.
+  when:
+    - ansible_check_mode
+    - mariadb_python_debian_check.rc | default(1) | int != 0
+
+- name: Refresh APT metadata after repository declaration
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: "{{ mariadb_apt_update_cache_valid_time }}"
+  register: mariadb_repository_cache_result
+
+- name: Inspect the MariaDB package candidate
+  ansible.builtin.command:
+    argv:
+      - apt-cache
+      - policy
+      - mariadb-server
+  register: mariadb_server_package_policy
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  no_log: true
+
+- name: Assert the APT candidate is from the selected MariaDB series
+  ansible.builtin.assert:
+    that:
+      - mariadb_server_package_policy.rc == 0
+      - mariadb_server_package_policy.stdout is search(
+          'Candidate:\\s+[^\\n]*' ~ (mariadb_server_version | regex_escape))
+    fail_msg: >-
+      A MariaDB {{ mariadb_server_version }} package candidate was not found.
+      The role refuses to install Ubuntu's built-in MariaDB package.
+  no_log: true
+  when:
+    - not ansible_check_mode
+      or (
+        mariadb_python_debian_check.rc | default(0) | int == 0
+        and
+        not (mariadb_repository_definition_result.changed | default(false) | bool)
+        and not (mariadb_repository_cache_result.changed | default(false) | bool)
+      )
+
+- name: Explain deferred package-candidate validation in check mode
+  ansible.builtin.debug:
+    msg: >-
+      Package-candidate validation is deferred because check mode predicts a
+      repository or APT-cache change that has not been applied.
+  when:
+    - ansible_check_mode
+    - mariadb_python_debian_check.rc | default(0) | int == 0
+    - mariadb_repository_definition_result.changed | default(false) | bool
+      or mariadb_repository_cache_result.changed | default(false) | bool
+
+- name: Explain deferred package checks without Python deb822 support
+  ansible.builtin.debug:
+    msg: >-
+      MariaDB package-candidate and PAM package validation is deferred because
+      check mode found no Python deb822 support. The prerequisite package will
+      be installed during the real run before repository validation.
+  when:
+    - ansible_check_mode
+    - mariadb_python_debian_check.rc | default(1) | int != 0
+
+- name: Pin MariaDB packages above Ubuntu packages
+  ansible.builtin.copy:
+    dest: "{{ mariadb_repository_pin_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Package: mariadb-*
+      Pin: release o=MariaDB
+      Pin-Priority: {{ mariadb_repository_pin_priority }}
+
+- name: Inspect candidate PAM plugin packages
+  ansible.builtin.command:
+    argv:
+      - apt-cache
+      - show
+      - "{{ item }}"
+  loop: "{{ mariadb_auth_pam_package_candidates }}"
+  register: mariadb_auth_pam_package_checks
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  no_log: true
+  when: mariadb_auth_pam_enabled | bool
+
+- name: Select the first available PAM plugin package
+  ansible.builtin.set_fact:
+    mariadb_auth_pam_package: >-
+      {{ (mariadb_auth_pam_package_checks.results | default([])
+          | selectattr('rc', 'equalto', 0)
+          | selectattr('stdout', 'search', 'Package:')
+          | map(attribute='item') | list | first) | default('') }}
+  no_log: true
+
+- name: Assert PAM package availability when it is required
+  ansible.builtin.assert:
+    that: mariadb_auth_pam_package | length > 0
+    fail_msg: >-
+      No auth_pam package candidate was advertised by the official MariaDB
+      repository. Set mariadb_auth_pam_required=false only when the plugin is
+      intentionally unavailable for the selected distribution.
+  no_log: true
+  when:
+    - mariadb_auth_pam_enabled | bool
+    - mariadb_auth_pam_required | bool
+    - not ansible_check_mode
+      or (
+        mariadb_python_debian_check.rc | default(0) | int == 0
+        and
+        not (mariadb_repository_definition_result.changed | default(false) | bool)
+        and not (mariadb_repository_cache_result.changed | default(false) | bool)
+      )
