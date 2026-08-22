@@ -1,0 +1,22 @@
+---
+- name: Prepare MariaDB baseline nodes
+  hosts: mariadb
+  become: true
+  gather_facts: true
+  vars:
+    # Safe fixture default: package, service, TLS, and database changes are
+    # disabled unless the caller opts in explicitly at runtime.
+    mariadb_fixture_apply: false
+    mariadb_enabled: "{{ mariadb_fixture_apply | bool }}"
+    mariadb_root_password: >-
+      {{ lookup('ansible.builtin.env', 'MARIADB_ROOT_PASSWORD') }}
+    mariadb_replication_password: >-
+      {{ lookup('ansible.builtin.env', 'MARIADB_REPLICATION_PASSWORD') }}
+    mariadb_tls_enabled: false
+    mariadb_bootstrap_new_server: false
+    mariadb_bootstrap_reset_master: false
+    mariadb_bootstrap_existing_host_mode: fail
+    mariadb_inventory_group: mariadb
+    mariadb_report_host: "{{ inventory_hostname }}.example.invalid"
+  roles:
+    - role: mariadb

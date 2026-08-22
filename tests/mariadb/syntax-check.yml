@@ -1,0 +1,12 @@
+---
+- name: Syntax-only MariaDB role fixture
+  hosts: mariadb
+  gather_facts: false
+  become: true
+  vars:
+    mariadb_enabled: false
+    mariadb_bootstrap_new_server: false
+    mariadb_bootstrap_reset_master: false
+    mariadb_tls_enabled: false
+  roles:
+    - role: mariadb
