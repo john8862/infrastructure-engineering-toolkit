@@ -1,0 +1,104 @@
+---
+- name: Report that MaxScale role is disabled
+  ansible.builtin.debug:
+    msg: MaxScale management is disabled; no package, configuration, or service changes were attempted.
+  when: not maxscale_enabled | bool
+  tags: [always, maxscale]
+
+- name: Validate MaxScale inputs
+  ansible.builtin.import_tasks: assertions.yml
+  when: maxscale_enabled | bool
+  tags: [always, maxscale, maxscale_validation]
+
+- name: Inspect current MaxScale service state
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ maxscale_service_name }}"
+  register: maxscale_service_state_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: maxscale_enabled | bool
+  tags: [maxscale, maxscale_validation]
+
+- name: Record current MaxScale service state
+  ansible.builtin.set_fact:
+    maxscale_service_was_active: >-
+      {{ maxscale_service_state_probe.rc | default(1) | int == 0
+         and maxscale_service_state_probe.stdout | default('') | trim == 'active' }}
+  when: maxscale_enabled | bool
+  tags: [maxscale, maxscale_validation]
+
+- name: Configure the official MariaDB MaxScale repository
+  ansible.builtin.import_tasks: repository.yml
+  when:
+    - maxscale_enabled | bool
+    - maxscale_manage_repository | bool
+    - not ansible_check_mode
+  tags: [maxscale, maxscale_repository]
+
+- name: Install MaxScale and declared support packages
+  ansible.builtin.import_tasks: install.yml
+  when:
+    - maxscale_enabled | bool
+    - maxscale_manage_package | bool
+    - not ansible_check_mode
+  tags: [maxscale, maxscale_install]
+
+- name: Build MaxScale runtime directories
+  ansible.builtin.import_tasks: directories.yml
+  when:
+    - maxscale_enabled | bool
+    - maxscale_manage_package | bool or maxscale_manage_service | bool or maxscale_render_configuration | default(true) | bool
+    - not ansible_check_mode
+  tags: [maxscale, maxscale_directories]
+
+- name: Configure MaxScale logging and log rotation
+  ansible.builtin.import_tasks: logging.yml
+  when:
+    - maxscale_enabled | bool
+    - maxscale_manage_package | bool or maxscale_render_configuration | default(true) | bool
+    - not ansible_check_mode
+  tags: [maxscale, maxscale_logging]
+
+- name: Configure optional MaxScale systemd policy
+  ansible.builtin.import_tasks: systemd.yml
+  when:
+    - maxscale_enabled | bool
+    - maxscale_manage_service | bool
+    - not ansible_check_mode
+  tags: [maxscale, maxscale_systemd]
+
+- name: Validate externally managed MaxScale TLS paths
+  ansible.builtin.include_tasks: tls_asset.yml
+  loop: "{{ maxscale_tls_assets_effective }}"
+  loop_control:
+    loop_var: maxscale_tls_asset
+    label: "{{ maxscale_tls_asset.name }}"
+  when:
+    - maxscale_enabled | bool
+    - maxscale_tls_validate_paths | bool
+  tags: [maxscale, maxscale_tls, maxscale_validation]
+
+- name: Render MaxScale configuration fragments
+  ansible.builtin.import_tasks: configure.yml
+  when:
+    - maxscale_enabled | bool
+    - maxscale_render_configuration | default(true) | bool
+    - not ansible_check_mode
+  tags: [maxscale, maxscale_configure]
+
+- name: Apply optional generic MaxScale firewall rules
+  ansible.builtin.import_tasks: firewall.yml
+  when:
+    - maxscale_enabled | bool
+    - maxscale_firewall_enabled | bool
+    - not ansible_check_mode
+  tags: [maxscale, maxscale_firewall]
+
+- name: Validate and safely reload MaxScale
+  ansible.builtin.import_tasks: validation.yml
+  when: maxscale_enabled | bool
+  tags: [maxscale, maxscale_validation]

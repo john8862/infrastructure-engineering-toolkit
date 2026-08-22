@@ -1,0 +1,112 @@
+---
+argument_specs:
+  main:
+    short_description: Manage a generic MariaDB MaxScale installation and configuration.
+    options:
+      maxscale_enabled:
+        type: bool
+        default: true
+      maxscale_manage_repository:
+        type: bool
+        default: false
+      maxscale_manage_package:
+        type: bool
+        default: false
+      maxscale_manage_service:
+        type: bool
+        default: false
+      maxscale_package_name:
+        type: str
+        default: maxscale
+      maxscale_package_state:
+        type: str
+        choices:
+          - present
+          - latest
+        default: present
+      maxscale_repository_series:
+        type: str
+        default: "24.02"
+      maxscale_repository_url:
+        type: str
+        default: "https://dlm.mariadb.com/repo/maxscale/24.02/apt"
+      maxscale_repository_key_url:
+        type: str
+        default: "https://supplychain.mariadb.com/mariadb-keyring-2025.gpg"
+      maxscale_repository_keyring:
+        type: str
+        default: /etc/apt/keyrings/mariadb-maxscale.gpg
+      maxscale_repository_key_fingerprint:
+        type: str
+        default: BB2A36F36C3B4D373BAC328A5D87FACA8C27D14E
+      maxscale_config_file:
+        type: str
+        default: /etc/maxscale.cnf
+      maxscale_config_dir:
+        type: str
+        default: /etc/maxscale.cnf.d
+      maxscale_config_validate_enabled:
+        type: bool
+        default: true
+      maxscale_render_configuration:
+        type: bool
+        default: true
+      maxscale_config_backup:
+        type: bool
+        default: true
+      maxscale_servers:
+        type: list
+        elements: dict
+        default: []
+      maxscale_monitors:
+        type: list
+        elements: dict
+        default: []
+      maxscale_services:
+        type: list
+        elements: dict
+        default: []
+      maxscale_listeners:
+        type: list
+        elements: dict
+        default: []
+      maxscale_credentials:
+        type: dict
+        default: {}
+      maxscale_render_credentials:
+        type: bool
+        default: false
+      maxscale_admin_tls_enabled:
+        type: bool
+        default: false
+      maxscale_admin_tls_cert:
+        type: str
+        default: ""
+      maxscale_admin_tls_key:
+        type: str
+        default: ""
+      maxscale_admin_tls_ca:
+        type: str
+        default: ""
+      maxscale_tls_validate_paths:
+        type: bool
+        default: true
+      maxscale_systemd_override_enabled:
+        type: bool
+        default: false
+      maxscale_health_check_enabled:
+        type: bool
+        default: false
+      maxscale_health_check_url:
+        type: str
+        default: "http://127.0.0.1:8989/v1/maxscale"
+      maxscale_reload_on_change:
+        type: bool
+        default: true
+      maxscale_firewall_enabled:
+        type: bool
+        default: false
+      maxscale_firewall_rules:
+        type: list
+        elements: dict
+        default: []

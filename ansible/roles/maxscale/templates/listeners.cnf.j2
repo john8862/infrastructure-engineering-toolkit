@@ -1,0 +1,12 @@
+{% from 'maxscale_macros.j2' import render_options %}
+# Managed by Ansible.  Listener definitions.
+{% for listener in maxscale_listeners %}
+[{{ listener.name }}]
+type=listener
+service={{ listener.service }}
+protocol={{ listener.protocol | default('MariaDBClient') }}
+{% if listener.address is defined %}address={{ listener.address }}
+{% endif %}{% if listener.port is defined %}port={{ listener.port }}
+{% endif %}{% if listener.socket is defined %}socket={{ listener.socket }}
+{% endif %}{{ render_options(maxscale_listener_options_effective.get(listener.name, {})) }}
+{% endfor %}

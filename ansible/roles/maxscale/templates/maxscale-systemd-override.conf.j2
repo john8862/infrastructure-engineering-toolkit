@@ -1,0 +1,8 @@
+[Service]
+Restart={{ maxscale_systemd_restart }}
+RestartSec={{ maxscale_systemd_restart_sec }}
+{% if maxscale_systemd_timeout_start_sec | string | length > 0 %}TimeoutStartSec={{ maxscale_systemd_timeout_start_sec }}
+{% endif %}{% if maxscale_systemd_timeout_stop_sec | string | length > 0 %}TimeoutStopSec={{ maxscale_systemd_timeout_stop_sec }}
+{% endif %}{% if maxscale_systemd_limit_nofile | string | length > 0 %}LimitNOFILE={{ maxscale_systemd_limit_nofile }}
+{% endif %}{% for name, value in maxscale_systemd_environment.items() %}Environment="{{ name }}={{ value }}"
+{% endfor %}

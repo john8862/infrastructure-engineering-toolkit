@@ -1,0 +1,16 @@
+---
+- name: Reload systemd manager for MaxScale
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: maxscale daemon reload
+
+- name: Reload MaxScale after a validated configuration change
+  ansible.builtin.systemd:
+    name: "{{ maxscale_service_name }}"
+    state: reloaded
+  listen: maxscale reload
+  when:
+    - maxscale_manage_service | bool
+    - maxscale_reload_on_change | bool
+    - maxscale_service_was_active | default(false) | bool
+    - not ansible_check_mode

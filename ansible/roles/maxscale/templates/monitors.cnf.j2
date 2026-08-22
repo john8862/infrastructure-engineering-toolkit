@@ -1,0 +1,12 @@
+{% from 'maxscale_macros.j2' import render_options %}
+# Managed by Ansible.  Monitor definitions.
+{% for monitor in maxscale_monitors %}
+[{{ monitor.name }}]
+type=monitor
+module={{ monitor.module | default('mariadbmon') }}
+servers={{ monitor.servers | join(',') }}
+{% if monitor.user is defined and monitor.user | string | length > 0 %}user={{ monitor.user }}
+{% elif maxscale_render_credentials | bool and monitor.credential | default('') in maxscale_credentials %}user={{ maxscale_credentials[monitor.credential].username | default('') }}
+{% endif %}{% if maxscale_render_credentials | bool and monitor.credential | default('') in maxscale_credentials and maxscale_credentials[monitor.credential].password | default('') | string | length > 0 %}password={{ maxscale_credentials[monitor.credential].password }}
+{% endif %}{{ render_options(maxscale_monitor_options_effective.get(monitor.name, {})) }}
+{% endfor %}

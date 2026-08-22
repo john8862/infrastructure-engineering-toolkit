@@ -1,0 +1,80 @@
+---
+- name: Build effective MaxScale global, admin, and logging options
+  ansible.builtin.set_fact:
+    maxscale_global_options_effective: "{{ maxscale_global_options }}"
+    maxscale_admin_options_effective: >-
+      {{ {
+           'admin_enabled': maxscale_admin_enabled | bool,
+           'admin_host': maxscale_admin_host,
+           'admin_port': maxscale_admin_port,
+           'admin_auth': maxscale_admin_auth | bool,
+           'admin_secure_gui': maxscale_admin_secure_gui | bool
+         }
+         | combine(
+             {
+               'admin_ssl': true,
+               'admin_ssl_cert': maxscale_admin_tls_cert,
+               'admin_ssl_key': maxscale_admin_tls_key,
+               'admin_ssl_ca': maxscale_admin_tls_ca,
+               'admin_ssl_verify_peer': maxscale_admin_tls_verify_peer | bool
+             }
+             if maxscale_admin_tls_enabled | bool else {}, recursive=true) }}
+    maxscale_logging_options_effective: >-
+      {{ maxscale_logging_options
+         | combine(maxscale_logging_extra_options, recursive=true) }}
+
+- name: Render the MaxScale root configuration
+  ansible.builtin.template:
+    src: maxscale.cnf.j2
+    dest: "{{ maxscale_config_file }}"
+    owner: "{{ maxscale_config_owner }}"
+    group: "{{ maxscale_config_group }}"
+    mode: "{{ maxscale_config_mode }}"
+    backup: "{{ maxscale_config_backup | bool }}"
+    validate: >-
+      {{ maxscale_config_validate_command
+         if maxscale_config_validate_enabled | bool else omit }}
+  notify: maxscale reload
+  no_log: "{{ maxscale_render_credentials | bool }}"
+
+- name: Render MaxScale backend server definitions
+  ansible.builtin.template:
+    src: servers.cnf.j2
+    dest: "{{ maxscale_config_dir }}/20-servers.cnf"
+    owner: "{{ maxscale_config_owner }}"
+    group: "{{ maxscale_config_group }}"
+    mode: "{{ maxscale_config_mode }}"
+    backup: "{{ maxscale_config_backup | bool }}"
+  notify: maxscale reload
+
+- name: Render MaxScale monitor definitions
+  ansible.builtin.template:
+    src: monitors.cnf.j2
+    dest: "{{ maxscale_config_dir }}/30-monitors.cnf"
+    owner: "{{ maxscale_config_owner }}"
+    group: "{{ maxscale_config_group }}"
+    mode: "{{ maxscale_config_mode }}"
+    backup: "{{ maxscale_config_backup | bool }}"
+  notify: maxscale reload
+  no_log: "{{ maxscale_render_credentials | bool }}"
+
+- name: Render MaxScale service definitions
+  ansible.builtin.template:
+    src: services.cnf.j2
+    dest: "{{ maxscale_config_dir }}/40-services.cnf"
+    owner: "{{ maxscale_config_owner }}"
+    group: "{{ maxscale_config_group }}"
+    mode: "{{ maxscale_config_mode }}"
+    backup: "{{ maxscale_config_backup | bool }}"
+  notify: maxscale reload
+  no_log: "{{ maxscale_render_credentials | bool }}"
+
+- name: Render MaxScale listener definitions
+  ansible.builtin.template:
+    src: listeners.cnf.j2
+    dest: "{{ maxscale_config_dir }}/50-listeners.cnf"
+    owner: "{{ maxscale_config_owner }}"
+    group: "{{ maxscale_config_group }}"
+    mode: "{{ maxscale_config_mode }}"
+    backup: "{{ maxscale_config_backup | bool }}"
+  notify: maxscale reload

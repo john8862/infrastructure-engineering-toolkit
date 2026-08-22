@@ -1,0 +1,58 @@
+---
+- name: Render a generic MaxScale fixture
+  hosts: all
+  gather_facts: true
+  roles:
+    - role: maxscale
+      vars:
+        maxscale_allow_unsupported_platform: true
+        maxscale_manage_repository: false
+        maxscale_manage_package: false
+        maxscale_manage_service: false
+        maxscale_config_validate_enabled: false
+        maxscale_health_check_enabled: false
+        maxscale_service_user: "{{ ansible_facts.user_id }}"
+        maxscale_service_group: "{{ ansible_facts.user_gid }}"
+        maxscale_config_owner: "{{ ansible_facts.user_id }}"
+        maxscale_config_group: "{{ ansible_facts.user_gid }}"
+        maxscale_config_file: "{{ playbook_dir }}/tmp/maxscale.cnf"
+        maxscale_config_dir: "{{ playbook_dir }}/tmp/maxscale.cnf.d"
+        maxscale_data_directory: "{{ playbook_dir }}/tmp/data"
+        maxscale_log_directory: "{{ playbook_dir }}/tmp/log"
+        maxscale_run_directory: "{{ playbook_dir }}/tmp/run"
+        maxscale_cache_directory: "{{ playbook_dir }}/tmp/cache"
+        maxscale_persist_directory: "{{ playbook_dir }}/tmp/data/persist"
+        maxscale_certificate_directory: "{{ playbook_dir }}/tmp/certs"
+        maxscale_certificate_directory_owner: "{{ ansible_facts.user_id }}"
+        maxscale_certificate_directory_group: "{{ ansible_facts.user_gid }}"
+        maxscale_logrotate_enabled: false
+        maxscale_logrotate_file: "{{ playbook_dir }}/tmp/maxscale.logrotate"
+        maxscale_logrotate_postrotate_command: /bin/true
+        maxscale_servers:
+          - name: db-a
+            address: 192.0.2.11
+            port: 3306
+          - name: db-b
+            address: 192.0.2.12
+            port: 3306
+        maxscale_monitors:
+          - name: mariadb-monitor
+            module: mariadbmon
+            servers:
+              - db-a
+              - db-b
+            options:
+              monitor_interval: 2s
+        maxscale_services:
+          - name: read-write
+            router: readwritesplit
+            servers:
+              - db-a
+              - db-b
+            options:
+              transaction_replay: true
+        maxscale_listeners:
+          - name: read-write-listener
+            service: read-write
+            address: 0.0.0.0
+            port: 13306

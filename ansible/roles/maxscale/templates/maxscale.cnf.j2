@@ -1,0 +1,6 @@
+{% from 'maxscale_macros.j2' import render_options %}
+# Managed by Ansible.  Object definitions are kept in {{ maxscale_config_dir }}.
+[maxscale]
+{{ render_options(maxscale_global_options_effective) }}
+{{ render_options(maxscale_admin_options_effective) }}
+{{ render_options(maxscale_logging_options_effective) }}

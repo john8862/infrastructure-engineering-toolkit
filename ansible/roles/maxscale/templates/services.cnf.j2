@@ -1,0 +1,12 @@
+{% from 'maxscale_macros.j2' import render_options %}
+# Managed by Ansible.  Service definitions.
+{% for service in maxscale_services %}
+[{{ service.name }}]
+type=service
+router={{ service.router }}
+{% if service.servers | default([]) | length > 0 %}servers={{ service.servers | join(',') }}
+{% endif %}{% if service.user is defined and service.user | string | length > 0 %}user={{ service.user }}
+{% elif maxscale_render_credentials | bool and service.credential | default('') in maxscale_credentials %}user={{ maxscale_credentials[service.credential].username | default('') }}
+{% endif %}{% if maxscale_render_credentials | bool and service.credential | default('') in maxscale_credentials and maxscale_credentials[service.credential].password | default('') | string | length > 0 %}password={{ maxscale_credentials[service.credential].password }}
+{% endif %}{{ render_options(service.options | default({})) }}
+{% endfor %}

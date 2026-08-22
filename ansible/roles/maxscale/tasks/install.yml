@@ -1,0 +1,33 @@
+---
+- name: Install MaxScale from the selected package source
+  ansible.builtin.apt:
+    name: "{{ maxscale_package_name }}"
+    state: "{{ maxscale_package_state }}"
+    update_cache: "{{ maxscale_manage_repository | bool }}"
+    cache_valid_time: "{{ maxscale_apt_cache_valid_time }}"
+
+- name: Gather installed MaxScale package facts
+  ansible.builtin.package_facts:
+    manager: auto
+  when: maxscale_validate_package_version | bool
+
+- name: Validate the installed MaxScale major series
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.packages[maxscale_package_name] is defined
+      - >-
+        (ansible_facts.packages[maxscale_package_name][0].version
+         is match('^' ~ (maxscale_repository_series | regex_escape) ~ '(\\.|$)'))
+    fail_msg: >-
+      The installed MaxScale package does not match the requested repository
+      series {{ maxscale_repository_series }}. Review repository and package policy.
+  when: maxscale_validate_package_version | bool
+
+- name: Ensure the MaxScale service account exists
+  ansible.builtin.user:
+    name: "{{ maxscale_service_user }}"
+    group: "{{ maxscale_service_group }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present

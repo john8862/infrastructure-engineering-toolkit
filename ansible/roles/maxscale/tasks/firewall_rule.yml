@@ -1,0 +1,26 @@
+---
+- name: Resolve the source list for one MaxScale firewall rule
+  ansible.builtin.set_fact:
+    maxscale_firewall_rule_sources_effective: >-
+      {{ maxscale_firewall_rule.sources
+         if maxscale_firewall_rule.sources is defined
+            and maxscale_firewall_rule.sources is not string
+         else ([maxscale_firewall_rule.sources]
+               if maxscale_firewall_rule.sources is defined
+               else maxscale_firewall_allow_sources)
+         | default([], true) }}
+
+- name: Apply one MaxScale UFW rule for each source
+  ansible.builtin.command: >-
+    ufw allow
+    {% if maxscale_firewall_rule_source | string | length > 0 %}
+    from {{ maxscale_firewall_rule_source }} to any port {{ maxscale_firewall_rule.port }}
+    proto {{ maxscale_firewall_rule.protocol | default('tcp') }}
+    {% else %}{{ maxscale_firewall_rule.port }}/{{ maxscale_firewall_rule.protocol | default('tcp') }}{% endif %}
+  loop: "{{ maxscale_firewall_rule_sources_effective if maxscale_firewall_rule_sources_effective | length > 0 else [''] }}"
+  loop_control:
+    loop_var: maxscale_firewall_rule_source
+  register: maxscale_ufw_rule_result
+  changed_when: >-
+    'Rule added' in maxscale_ufw_rule_result.stdout
+    or 'Rules updated' in maxscale_ufw_rule_result.stdout
