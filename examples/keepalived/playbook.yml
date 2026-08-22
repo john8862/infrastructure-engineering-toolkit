@@ -1,0 +1,14 @@
+---
+- name: Parse a disabled Keepalived role fixture
+  hosts: all
+  gather_facts: false
+  vars:
+    # The fixture intentionally leaves the role disabled. Running it cannot
+    # install packages, alter a service, change firewall policy, or claim a
+    # virtual IP. Use a separately reviewed inventory and variable set for a
+    # real deployment.
+    keepalived_enabled: false
+    keepalived_vrrp_instances: []
+    keepalived_sync_groups: []
+  roles:
+    - role: keepalived
