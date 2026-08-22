@@ -78,6 +78,9 @@ jobs:
           python tests/mariadb/test_contract.py
           python tests/mariadb_replication/test_contract.py
 
+      - name: Run deterministic release asset contract
+        run: python tests/release/test_assets.py
+
   ansible:
     name: Ansible lint, YAML, and fixture syntax
     runs-on: ubuntu-24.04

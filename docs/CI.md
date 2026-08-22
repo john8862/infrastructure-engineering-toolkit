@@ -19,6 +19,10 @@ this prevents a partial repository from being reported as a complete build.
   suite.
 - Python contract suites for DNS, MariaDB, and MariaDB replication run on
   Python 3.13.
+- The release asset contract builds the five Ansible role archives and the
+  separate FreeIPA archive twice in temporary directories, then verifies
+  deterministic bytes, archive roots, safe modes, package boundaries, the
+  machine-readable manifest, and SHA-256 checksums. It never uploads assets.
 - Ansible collections are installed into the runner's temporary directory from
   `ansible/requirements.yml`, with exact versions. `ansible-lint`, `yamllint`,
   and syntax checks cover every public role fixture, including MaxScale and
