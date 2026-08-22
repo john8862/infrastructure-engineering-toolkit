@@ -13,6 +13,53 @@ promotion from `develop`. An emergency hotfix may target `main` when the normal
 path cannot be used, but the pull request must explain the reason and the
 equivalent fix must be brought back to `develop` afterwards.
 
+The intended contribution hierarchy is:
+
+```text
+fork or feature/fix branch  ->  develop  ->  main
+```
+
+Working branches are deliberately lightweight. Contributors may push, amend,
+rebase, or force-push their own topic branch as needed; protection is applied
+when the work crosses into `develop`. A fork contributor does not need push
+permission in this repository and should open a pull request from the fork to
+`develop`.
+
+### Protection policy
+
+Both protected branches require a pull request, the four named Quality Gates,
+resolved conversations, and protection against force-push and deletion. The
+solo-maintainer policy deliberately sets approvals to zero: external review is
+welcome and expected where available, but GitHub must not require a second
+person or Code Owner approval before the owner can merge a green pull request.
+
+| Control | `develop` | `main` |
+| --- | --- | --- |
+| Pull request required | Yes | Yes |
+| Required Quality Gates | Four checks | Four checks |
+| Branch must be up to date | No; reduce integration churn | Yes; release consistency |
+| Linear history | No; preserve fast integration | Yes; use squash or rebase |
+| Conversation resolution | Required | Required |
+| Required approvals | 0 | 0 |
+| Code Owner or last-push approval | No | No |
+| Merge queue, signed commits, deployment gate | None | None |
+| Force-push and deletion | Blocked | Blocked |
+
+The owner/admin break-glass path remains available for recovery, but it is not
+the normal development workflow and does not justify direct pushes. Do not
+reset, rewrite, or force-push `main` or `develop`.
+
+Normal topic merges should use squash where practical. A squash promotion can
+leave the two protected branches with different commit graphs. If a later
+`develop` to `main` pull request is reported as behind, use GitHub's **Update
+branch** action to merge current `main` into `develop` and rerun the checks, or
+open a focused `main` to `develop` synchronisation pull request. Never repair
+this state by rewriting a protected branch.
+
+The four required check contexts are documented in [`docs/CI.md`](docs/CI.md).
+They are the same on both protected branches; only the branch-freshness and
+history rules differ.
+
 For a fresh clone, the recommended starting sequence is:
 
 ```bash
@@ -24,8 +71,8 @@ git pull --ff-only origin develop
 git switch -c feature/mariadb-replication-safety
 ```
 
-Use one of these prefixes for a focused branch: `feature/`, `fix/`, `docs/`,
-`ci/`, `test/`, `refactor/`, or `chore/`. The preferred format is:
+Use one of these prefixes for a focused branch: `feature/`, `fix/`, `bugfix/`,
+`docs/`, `ci/`, `test/`, `refactor/`, or `chore/`. The preferred format is:
 
 ```text
 <prefix>/<focused-scope>-<short-description>
@@ -108,6 +155,10 @@ the validation evidence that applies to the integrated set. Release Please
 reads merged Conventional Commits on `main`; clear subjects make the generated
 release PR, changelog, and GitHub Release easier to review.
 
+An urgent hotfix starts from `main` and targets `main` through a focused pull
+request. Once it is merged, apply the equivalent change to `develop` through a
+separate pull request before the next promotion.
+
 Each pull request should meet these requirements:
 
 - Keep the diff focused on one component, documentation subject, or directly
@@ -180,7 +231,8 @@ The normal lifecycle is:
 5. After the change is integrated, maintainers may delete the merged topic
    branch; recreate future work from the latest `develop`.
 6. Promote a reviewed, green `develop` state to `main` through a separate pull
-   request. Release automation and version publication remain main-only.
+   request. `main` must be current because its required checks are strict;
+   release automation and version publication remain main-only.
 
 The branch model prioritises changes that are easy to review and integrate,
 but it does not replace maintainer judgement or the required technical,

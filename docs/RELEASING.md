@@ -24,16 +24,39 @@ GitHub Release.
 
 ## Normal release flow
 
-1. Merge changes into `main` using Conventional Commit subjects. Release Please
-   classifies `feat`, `fix`, `perf`, and breaking changes to calculate the next
-   semantic version.
-2. The workflow opens or updates one Release PR. Review its generated
-   `CHANGELOG.md`, `version.txt`, and manifest changes; the changelog entries
-   link back to the merged commits and pull requests.
-3. Merge the Release PR into `main`. The resulting `main` push lets Release
-   Please create the `v<version>` tag and a published GitHub Release whose notes
-   come from the same merged commit history.
-4. Confirm the tag, GitHub Release, version file, manifest, and changelog agree.
+1. Merge component changes into `develop` through focused pull requests using
+   Conventional Commit subjects. Release Please does not run from `develop`.
+2. Open a separate `develop` to `main` promotion pull request after the
+   integrated branch is reviewed and all four Quality Gates pass. `main` uses
+   strict, up-to-date checks and a linear history; the solo maintainer does not
+   need a second human approval.
+3. The resulting `main` push opens or updates one Release PR. Review its
+   generated `CHANGELOG.md`, `version.txt`, and manifest changes; changelog
+   entries link back to the merged commits and pull requests.
+4. Merge the Release PR into `main`. Release Please then creates the
+   `v<version>` tag and published GitHub Release whose notes come from the same
+   merged commit history.
+5. Confirm the tag, GitHub Release, version file, manifest, and changelog agree.
+
+## Promotion and branch synchronisation
+
+The normal path is `topic or fork -> develop -> main`. The `develop` branch is
+protected but deliberately allows faster, non-strict integration; `main` is
+the stable and release branch with strict freshness and linear-history rules.
+Normal topic merges should use squash where practical, and promotion should
+use squash or rebase according to the repository merge settings.
+
+A squash promotion can leave `develop` and `main` with different commit
+histories. If a later promotion pull request is behind, use GitHub's **Update
+branch** action to merge current `main` into `develop` and rerun the Quality
+Gates, or open a focused `main` to `develop` synchronisation pull request. Do
+not reset or force-push either protected branch. An urgent hotfix starts from
+`main`, is promoted through a focused pull request, and must then be applied
+back to `develop` before the next normal release.
+
+The repository owner/admin has a break-glass recovery path, but direct bypass
+is not the standard release method. Neither branch requires a second approval,
+Code Owner review, a merge queue, signed commits, or a deployment environment.
 
 ## Release PR metadata
 
