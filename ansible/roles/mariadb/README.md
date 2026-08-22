@@ -48,7 +48,7 @@ managed host, not only on the Ansible controller.
 The role owns these files and not the distribution's monolithic server file.
 The templates use MariaDB option groups deliberately: [server] for common
 server settings, [mariadbd] for daemon settings, and
-[mariadbd-<selected-series>] for version-specific settings. The
+`[mariadbd-<selected-series>]` for version-specific settings. The
 MySQL-compatible [mysqld] group is not used.
 
 | File | Responsibility |

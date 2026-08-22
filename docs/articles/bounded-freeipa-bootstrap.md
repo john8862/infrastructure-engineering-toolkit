@@ -1,6 +1,6 @@
 # Building a bounded FreeIPA bootstrap with an explicit DNS contract
 
-*Article draft — Infrastructure Engineering Toolkit*
+> Article draft — Infrastructure Engineering Toolkit
 
 Infrastructure bootstraps become difficult to operate when they hide foundational choices behind a single successful
 command. A FreeIPA deployment has several of those choices: realm and hostname, primary or replica role, CA mode, DNS

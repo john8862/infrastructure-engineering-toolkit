@@ -59,9 +59,8 @@ This is infrastructure bootstrap only. It does not configure users, groups, HBAC
 definitions, certificate profiles, password policies, trusts, application principals, Webmin ACLs, or project-specific
 identity policy.
 
-> **Warning**
+> **Warning:** FreeIPA names, realm, hostname, and DNS design are foundational choices. Review them carefully before installation.
 >
-> FreeIPA names, realm, hostname, and DNS design are foundational choices. Review them carefully before installation.
 > They are not ordinary settings that can be changed casually after the realm is created.
 
 ## Supported Platforms

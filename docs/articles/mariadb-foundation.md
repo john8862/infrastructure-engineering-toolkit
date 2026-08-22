@@ -1,6 +1,6 @@
 # Building a safe MariaDB foundation before high availability
 
-*Article draft — Infrastructure Engineering Toolkit*
+> Article draft — Infrastructure Engineering Toolkit
 
 A database baseline should make a host predictable without pretending to be a complete high-availability platform. The
 MariaDB role follows that boundary: it prepares a standalone Ubuntu host, hardens the service, establishes stable
