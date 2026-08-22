@@ -1,13 +1,37 @@
 # Infrastructure Engineering Toolkit
 
+> **Bounded infrastructure automation for identity, DNS, MariaDB, proxy, and high availability.**
+>
+> Six independently usable Bash and Ansible components with explicit contracts, inspect-before-mutate workflows, and
+> public-safe fixtures. Compose the pieces in a caller-owned playbook; this repository is not an end-to-end platform
+> installer.
+
 [![CI](https://github.com/john8862/infrastructure-engineering-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/john8862/infrastructure-engineering-toolkit/actions/workflows/ci.yml)
-[![Release Please](https://github.com/john8862/infrastructure-engineering-toolkit/actions/workflows/release-please.yml/badge.svg)](https://github.com/john8862/infrastructure-engineering-toolkit/actions/workflows/release-please.yml)
+[![Release workflow](https://github.com/john8862/infrastructure-engineering-toolkit/actions/workflows/release-please.yml/badge.svg)](https://github.com/john8862/infrastructure-engineering-toolkit/actions/workflows/release-please.yml)
 [![Latest release](https://img.shields.io/github/v/release/john8862/infrastructure-engineering-toolkit?display_name=tag&sort=semver)](https://github.com/john8862/infrastructure-engineering-toolkit/releases)
 [![Licence: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Ansible roles](https://img.shields.io/badge/Ansible-roles-EE0000?logo=ansible&logoColor=white)](https://www.ansible.com/)
+[![MariaDB](https://img.shields.io/badge/MariaDB-11.x%20%7C%2012.x-003545?logo=mariadb&logoColor=white)](https://mariadb.org/)
+[![FreeIPA](https://img.shields.io/badge/FreeIPA-identity%20bootstrap-2D5AA0)](https://www.freeipa.org/)
+[![MaxScale](https://img.shields.io/badge/MaxScale-bounded%20core-00758F)](https://mariadb.com/docs/maxscale/)
+[![Platform: Linux targets](https://img.shields.io/badge/platform-Linux%20targets-6F42C1?logo=linux&logoColor=white)](#supported-platforms-and-prerequisites)
 
-An openly licensed, deliberately bounded toolkit for identity, DNS, MariaDB, proxy, and VRRP operations. It packages
-small Bash and Ansible components with explicit contracts, read-only validation, and public-safe fixtures. Components
-can be used independently or composed by a caller's playbook; this repository is not an end-to-end platform installer.
+✨ [Highlights](#-highlights) · 🧩 [Components](#component-catalogue) · 🧭 [Platforms](#supported-platforms-and-prerequisites) · 🚀 [Quick Start](#safe-quick-start) · 📦 [Release assets](#release-assets) · 🤝 [Contributing](#contributing)
+
+## ✨ Highlights
+
+- **Composable by design:** FreeIPA, MariaDB, MariaDB replication, MaxScale, Keepalived, and DNS update remain
+  independently usable, with responsibilities and non-responsibilities documented for each interface.
+- **Inspect before mutating:** Check mode, dry-run paths, candidate configuration validation, deterministic contracts,
+  and explicit opt-in switches keep changes reviewable before they reach a target host.
+- **Packaged independently:** Release `v0.1.0` publishes five Ansible role archives plus a separate FreeIPA archive,
+  with a machine-readable manifest and SHA256 checksums for download verification.
+- **Public-safe by default:** Examples use documentation networks and `example.invalid`; credentials, certificates,
+  authoritative data, vendor packages, and runtime state stay outside the repository.
+
+> ⚠️ **Scope note:** “Linux” describes the component-specific target families listed below. It is not a promise that
+> every role runs on every Linux distribution. The CI runner is Ubuntu 24.04, while FreeIPA and the database/proxy
+> roles have different documented target constraints.
 
 The project is in `0.x` development. The component contracts and static validation are published, while target-host
 runtime validation remains the responsibility of the operator. In particular, the DNS update role has passed its
@@ -16,6 +40,7 @@ live execution before DNS was reached. No live DNS deployment outcome is claimed
 
 ## Contents
 
+- [Highlights](#-highlights)
 - [Why this repository exists](#why-this-repository-exists)
 - [Goals and engineering principles](#goals-and-engineering-principles)
 - [Component catalogue](#component-catalogue)
