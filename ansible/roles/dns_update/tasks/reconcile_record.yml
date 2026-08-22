@@ -1,0 +1,367 @@
+---
+- name: Validate one explicit DNS record definition
+  ansible.builtin.assert:
+    that:
+      - dns_update_record is mapping
+      - dns_update_record.name is defined
+      - dns_update_record.name | string | trim | length > 0
+      - (dns_update_record.type | default('A') | string | upper)
+        in ['A', 'PTR']
+      - (dns_update_record.state | default('present') | string | lower)
+        in ['present', 'absent']
+      - dns_update_record.zone is defined
+      - dns_update_record.zone | string | trim | length > 0
+      - >-
+        (dns_update_record.state | default('present') | string | lower)
+        == 'absent'
+        or (
+          dns_update_record.value is defined
+          and (
+            (dns_update_record.value is string
+             and dns_update_record.value | string | trim | length > 0)
+            or
+            (dns_update_record.value is sequence
+             and dns_update_record.value is not string
+             and dns_update_record.value | length > 0)
+          )
+        )
+      - (dns_update_record.port | default(dns_update_port) | int) > 0
+      - (dns_update_record.port | default(dns_update_port) | int) <= 65535
+      - (dns_update_record.protocol | default(dns_update_protocol) | lower)
+        in ['tcp', 'udp']
+      - (dns_update_record.timeout | default(dns_update_timeout) | float) > 0
+      - (dns_update_record.ttl | default(dns_update_ttl) | int) >= 0
+    fail_msg: >-
+      Each DNS record needs a non-empty name, an A or PTR type, an explicit
+      zone, valid state/value data, and valid transport settings. The role
+      never infers a reverse zone or discovers a zone from DNS.
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_validation
+
+- name: Normalize one DNS record definition
+  ansible.builtin.set_fact:
+    dns_update_record_type_effective: >-
+      {{ dns_update_record.type | default('A') | string | upper }}
+    dns_update_record_state_effective: >-
+      {{ dns_update_record.state | default('present') | string | lower }}
+    dns_update_record_zone_effective: >-
+      {{ dns_update_record.zone | string | trim | regex_replace('\.$', '') }}
+    dns_update_record_server_effective: >-
+      {{ (dns_update_record.server
+          if dns_update_record.server is defined
+             and dns_update_record.server | string | trim | length > 0
+          else dns_update_server)
+         | string | trim | regex_replace('\.$', '') }}
+    dns_update_record_port_effective: >-
+      {{ dns_update_record.port | default(dns_update_port) | int }}
+    dns_update_record_protocol_effective: >-
+      {{ dns_update_record.protocol | default(dns_update_protocol) | lower }}
+    dns_update_record_timeout_effective: >-
+      {{ dns_update_record.timeout | default(dns_update_timeout) | float }}
+    dns_update_record_ttl_effective: >-
+      {{ dns_update_record.ttl | default(dns_update_ttl) | int }}
+    dns_update_record_desired_values_raw: >-
+      {{ []
+         if (dns_update_record.state | default('present') | string | lower)
+            == 'absent'
+         else ([dns_update_record.value]
+               if dns_update_record.value is string
+               else dns_update_record.value | list) }}
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Validate PTR cardinality and normalized zone
+  ansible.builtin.assert:
+    that:
+      - dns_update_record_zone_effective | length > 0
+      - not dns_update_manage | bool
+        or dns_update_record_server_effective | length > 0
+      - dns_update_record_type_effective != 'PTR'
+        or dns_update_record_state_effective == 'absent'
+        or dns_update_record_desired_values_raw | length == 1
+    fail_msg: >-
+      A DNS zone and managed update server must remain explicit. A present
+      PTR record must contain exactly one target value.
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_validation
+
+- name: Build the read-only DNS query arguments
+  ansible.builtin.set_fact:
+    dns_update_record_query_argv: >-
+      {{ [dns_update_query_binary, '+short',
+          '@' ~ dns_update_record_server_effective,
+          dns_update_record.name, dns_update_record_type_effective]
+         if dns_update_record_server_effective | length > 0
+         else [dns_update_query_binary, '+short', dns_update_record.name,
+               dns_update_record_type_effective] }}
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Read the current DNS record value without changing DNS
+  ansible.builtin.command:
+    argv: "{{ dns_update_record_query_argv }}"
+  register: dns_update_record_query
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Normalize current and desired DNS values
+  ansible.builtin.set_fact:
+    dns_update_record_query_failed: >-
+      {{ dns_update_record_query.rc | default(1) | int != 0 }}
+    dns_update_record_current_values: >-
+      {{ dns_update_record_query.stdout_lines | default([])
+         | map('string') | map('trim') | reject('equalto', '')
+         | map('regex_replace', '\.$', '') | map('lower') | list }}
+    dns_update_record_desired_values: >-
+      {{ dns_update_record_desired_values_raw
+         | map('string') | map('trim')
+         | map('regex_replace', '\.$', '') | map('lower') | list }}
+    dns_update_record_update_values: >-
+      {{ (dns_update_record_desired_values_raw
+          | map('string') | map('trim')
+          | map('regex_replace', '^(.*[^.])$', '\\1.') | list)
+         if dns_update_record_type_effective == 'PTR'
+         else (dns_update_record_desired_values_raw
+               | map('string') | map('trim') | list) }}
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Classify no-op and PTR conflict outcomes
+  ansible.builtin.set_fact:
+    dns_update_record_matches: >-
+      {{ not dns_update_record_query_failed | bool
+         and (
+           (dns_update_record_state_effective == 'present'
+            and (dns_update_record_current_values | sort
+                 == dns_update_record_desired_values | sort))
+           or
+           (dns_update_record_state_effective == 'absent'
+            and dns_update_record_current_values | length == 0)
+         ) }}
+    dns_update_record_conflict: >-
+      {{ not dns_update_record_query_failed | bool
+         and dns_update_record_type_effective == 'PTR'
+         and dns_update_record_state_effective == 'present'
+         and dns_update_record_current_values | length > 0
+         and not (dns_update_record_current_values | sort
+                  == dns_update_record_desired_values | sort) }}
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Report an already-correct DNS record without changing it
+  ansible.builtin.debug:
+    msg:
+      record: "{{ dns_update_record.name }}"
+      type: "{{ dns_update_record_type_effective }}"
+      zone: "{{ dns_update_record_zone_effective }}"
+      state: unchanged
+      values: "{{ dns_update_record_current_values }}"
+  when: dns_update_record_matches | bool
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Report a conflicting PTR without deleting unrelated DNS data
+  ansible.builtin.debug:
+    msg:
+      record: "{{ dns_update_record.name }}"
+      type: PTR
+      zone: "{{ dns_update_record_zone_effective }}"
+      state: conflict
+      current: "{{ dns_update_record_current_values }}"
+      requested: "{{ dns_update_record_desired_values }}"
+      message: >-
+        PTR replacement was skipped because the existing value is not proven
+        to be owned by this role. Set dns_update_conflict_policy=replace only
+        for an explicitly approved managed zone.
+  when:
+    - dns_update_record_conflict | bool
+    - dns_update_conflict_policy | lower != 'replace'
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Create an isolated Kerberos credential cache for GSS-TSIG
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: "{{ dns_update_kerberos_cache_prefix }}"
+  register: dns_update_record_tempdir
+  when:
+    - dns_update_manage | bool
+    - not ansible_check_mode
+    - dns_update_auth_mode_effective == 'gss-tsig'
+    - not dns_update_record_matches | bool
+    - >-
+      not (dns_update_record_conflict | bool
+           and dns_update_conflict_policy | lower != 'replace')
+    - dns_update_record_zone_effective | length > 0
+    - dns_update_record_server_effective | length > 0
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Obtain a Kerberos ticket for GSS-TSIG DNS update
+  ansible.builtin.command:
+    argv:
+      - "{{ dns_update_kinit_binary }}"
+      - -c
+      - "{{ dns_update_record_tempdir.path }}/krb5cc"
+      - "{{ dns_update_kerberos_principal }}"
+    stdin: "{{ dns_update_kerberos_password }}"
+  environment:
+    KRB5CCNAME: "FILE:{{ dns_update_record_tempdir.path }}/krb5cc"
+  register: dns_update_record_kinit
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - dns_update_record_tempdir is defined
+    - dns_update_record_tempdir.path is defined
+    - dns_update_auth_mode_effective == 'gss-tsig'
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Apply one DNS record change with community.general.nsupdate
+  community.general.nsupdate:
+    state: "{{ dns_update_record_state_effective }}"
+    server: "{{ dns_update_record_server_effective }}"
+    port: "{{ dns_update_record_port_effective }}"
+    protocol: "{{ dns_update_record_protocol_effective }}"
+    timeout: "{{ dns_update_record_timeout_effective }}"
+    zone: "{{ dns_update_record_zone_effective }}"
+    record: "{{ dns_update_record.name }}"
+    type: "{{ dns_update_record_type_effective }}"
+    ttl: "{{ dns_update_record_ttl_effective }}"
+    value: >-
+      {{ dns_update_record_update_values
+         if dns_update_record_state_effective == 'present'
+         else omit }}
+    key_algorithm: >-
+      {{ 'gss-tsig'
+         if dns_update_auth_mode_effective == 'gss-tsig'
+         else dns_update_key_algorithm_effective
+         if dns_update_auth_mode_effective == 'tsig'
+         else omit }}
+    key_name: >-
+      {{ dns_update_key_name
+         if dns_update_auth_mode_effective == 'tsig'
+         else omit }}
+    key_secret: >-
+      {{ dns_update_key_secret
+         if dns_update_auth_mode_effective == 'tsig'
+         else omit }}
+  environment: >-
+    {{ {'KRB5CCNAME': 'FILE:' ~ dns_update_record_tempdir.path ~ '/krb5cc'}
+       if dns_update_auth_mode_effective == 'gss-tsig' else {} }}
+  register: dns_update_record_change
+  failed_when: false
+  no_log: true
+  when:
+    - dns_update_manage | bool
+    - not ansible_check_mode
+    - not dns_update_record_matches | bool
+    - >-
+      not (dns_update_record_conflict | bool
+           and dns_update_conflict_policy | lower != 'replace')
+    - dns_update_record_zone_effective | length > 0
+    - dns_update_record_server_effective | length > 0
+    - dns_update_auth_mode_effective != 'gss-tsig'
+      or (dns_update_record_kinit | default({})).get('rc', 1) | int == 0
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Classify the DNS update module result
+  ansible.builtin.set_fact:
+    dns_update_record_change_failed: >-
+      {{ dns_update_record_change.failed | default(false) | bool
+         or dns_update_record_change.dns_rc | default(0) | int != 0 }}
+  when: dns_update_record_change is defined
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Report the DNS update result without blocking other roles
+  ansible.builtin.debug:
+    msg:
+      record: "{{ dns_update_record.name }}"
+      type: "{{ dns_update_record_type_effective }}"
+      current: "{{ dns_update_record_current_values }}"
+      requested: "{{ dns_update_record_desired_values }}"
+      zone: "{{ dns_update_record_zone_effective }}"
+      server: "{{ dns_update_record_server_effective | default('resolver') }}"
+      check_mode: "{{ ansible_check_mode | bool }}"
+      changed: "{{ dns_update_record_change.changed | default(false) }}"
+      failed: "{{ dns_update_record_change_failed | default(false) }}"
+      dns_rc: "{{ dns_update_record_change.dns_rc | default('not-attempted') }}"
+      dns_rc_str: >-
+        {{ dns_update_record_change.dns_rc_str | default('not-attempted') }}
+      query_failed: "{{ dns_update_record_query_failed | bool }}"
+      message: >-
+        DNS changes are independently reported. A missing record, unavailable
+        DNS module dependency, authentication failure, or insufficient DNS
+        permission does not block another role unless
+        dns_update_fail_on_error is enabled.
+  when:
+    - not dns_update_record_matches | bool
+    - not (dns_update_record_conflict | bool
+           and dns_update_conflict_policy | lower != 'replace')
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Remove the isolated Kerberos credential cache directory
+  ansible.builtin.file:
+    path: "{{ dns_update_record_tempdir.path }}"
+    state: absent
+  when:
+    - dns_update_record_tempdir is defined
+    - dns_update_record_tempdir.path is defined
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_record
+
+- name: Fail explicitly only when DNS update failure policy is enabled
+  ansible.builtin.assert:
+    that:
+      - not (dns_update_record_query_failed | bool)
+      - dns_update_auth_mode_effective != 'gss-tsig'
+        or (dns_update_record_kinit | default({})).get('rc', 1) | int == 0
+      - not (dns_update_record_change_failed | default(true) | bool)
+    fail_msg: >-
+      DNS update for {{ dns_update_record.name }} failed or could not be
+      completed. The role did not alter unrelated records.
+  when:
+    - dns_update_fail_on_error | bool
+    - dns_update_manage | bool
+    - not ansible_check_mode
+    - not dns_update_record_matches | bool
+    - >-
+      not (dns_update_record_conflict | bool
+           and dns_update_conflict_policy | lower != 'replace')
+  no_log: true
+  tags:
+    - dns_update
+    - dns_update_record

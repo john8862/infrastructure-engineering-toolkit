@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: dns_update
+  author: Infrastructure Engineering Toolkit maintainers
+  description: >-
+    Reconcile explicitly declared A and PTR records through secure DDNS
+    interfaces.
+  license: MIT
+  min_ansible_version: "2.18"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+  galaxy_tags:
+    - dns
+    - ddns
+    - nsupdate
+dependencies: []

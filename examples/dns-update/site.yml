@@ -1,0 +1,26 @@
+---
+- name: Inspect explicitly declared documentation DNS records
+  hosts: all
+  gather_facts: false
+  connection: local
+  vars:
+    dns_update_enabled: true
+    dns_update_manage: false
+    dns_update_auth_mode: gss-tsig
+    dns_update_server: ns1.example.invalid
+    dns_update_port: 53
+    dns_update_protocol: tcp
+    dns_update_timeout: 5.0
+    dns_update_records:
+      - name: app.example.invalid.
+        type: A
+        value: 198.51.100.20
+        zone: example.invalid.
+        state: present
+      - name: 20.100.51.198.in-addr.arpa.
+        type: PTR
+        value: app.example.invalid.
+        zone: 100.51.198.in-addr.arpa.
+        state: present
+  roles:
+    - role: dns_update
