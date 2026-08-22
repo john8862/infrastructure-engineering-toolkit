@@ -1,0 +1,572 @@
+---
+- name: Validate Keepalived existing-deployment guard mode
+  ansible.builtin.assert:
+    that:
+      - >-
+        keepalived_existing_deployment_mode | string | lower in
+        ['auto', 'new', 'maintenance']
+    fail_msg: >-
+      keepalived_existing_deployment_mode must be auto, new, or maintenance.
+  when: keepalived_enabled | bool
+  tags:
+    - always
+    - keepalived
+
+- name: Inspect the existing Keepalived configuration file
+  ansible.builtin.stat:
+    path: "{{ keepalived_config_file }}"
+  register: keepalived_existing_deployment_config
+  when: keepalived_enabled | bool
+  tags:
+    - always
+    - keepalived
+    - keepalived_validation
+
+- name: Inspect whether Keepalived is currently active
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ keepalived_service }}"
+  register: keepalived_existing_deployment_service
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: keepalived_enabled | bool
+  tags:
+    - always
+    - keepalived
+    - keepalived_validation
+
+- name: Classify the existing Keepalived deployment
+  ansible.builtin.set_fact:
+    keepalived_existing_deployment_state: >-
+      {{ 'configured_running'
+         if (keepalived_existing_deployment_config.stat.exists
+             | default(false) | bool
+             and keepalived_existing_deployment_service.rc | default(1)
+             | int == 0
+             and keepalived_existing_deployment_service.stdout | default('')
+             | trim == 'active')
+         else ('configured_stopped'
+               if keepalived_existing_deployment_config.stat.exists
+               | default(false) | bool
+               else 'not_configured') }}
+    keepalived_existing_deployment_protected: >-
+      {{ keepalived_existing_deployment_mode | string | lower == 'maintenance'
+         or (keepalived_existing_deployment_mode | string | lower == 'auto'
+             and keepalived_existing_deployment_config.stat.exists
+             | default(false) | bool
+             and keepalived_existing_deployment_service.rc | default(1)
+             | int == 0
+             and keepalived_existing_deployment_service.stdout | default('')
+             | trim == 'active') }}
+    keepalived_mutations_allowed: >-
+      {{ (not (
+            keepalived_existing_deployment_mode | string | lower
+            == 'maintenance'
+            or (keepalived_existing_deployment_mode | string | lower == 'auto'
+                and keepalived_existing_deployment_config.stat.exists
+                | default(false) | bool
+                and keepalived_existing_deployment_service.rc | default(1)
+                | int == 0
+                and keepalived_existing_deployment_service.stdout | default('')
+                | trim == 'active')
+          )
+         or keepalived_existing_deployment_reconcile_enabled | bool) }}
+  no_log: true
+  when: keepalived_enabled | bool
+  tags:
+    - always
+    - keepalived
+
+- name: Refuse explicit new Keepalived mode over a running service
+  ansible.builtin.assert:
+    that:
+      - not (
+          keepalived_existing_deployment_mode | string | lower == 'new'
+          and keepalived_existing_deployment_state == 'configured_running'
+        )
+    fail_msg: >-
+      keepalived_existing_deployment_mode=new was requested, but Keepalived
+      is already configured and running. Use auto or maintenance for a
+      protected existing deployment.
+  when: keepalived_enabled | bool
+  tags:
+    - always
+    - keepalived
+
+- name: Report the existing Keepalived deployment classification
+  ansible.builtin.debug:
+    msg:
+      state: "{{ keepalived_existing_deployment_state }}"
+      protected: "{{ keepalived_existing_deployment_protected | bool }}"
+      mutations_allowed: "{{ keepalived_mutations_allowed | bool }}"
+      message: >-
+        A configured and running Keepalived service is validation-only by
+        default. Set keepalived_existing_deployment_reconcile_enabled=true
+        during planned maintenance to apply a delta.
+  when: keepalived_enabled | bool
+  tags:
+    - always
+    - keepalived
+
+- name: Validate the generic Keepalived input model
+  ansible.builtin.assert:
+    that:
+      - keepalived_vrrp_instances is iterable
+      - keepalived_vrrp_instances | length > 0
+      - >-
+        (keepalived_vrrp_instances | map(attribute='name') | list | unique
+        | length) == (keepalived_vrrp_instances | length)
+      - >-
+        (keepalived_vrrp_instances | map(attribute='virtual_router_id')
+        | list | unique | length) == (keepalived_vrrp_instances | length)
+      - >-
+        keepalived_sync_groups | length == 0 or keepalived_sync_groups is
+        iterable
+    fail_msg: >-
+      keepalived_vrrp_instances must contain at least one uniquely named
+      instance, and each independent instance must use a distinct VRID.
+  when: keepalived_enabled | bool
+  tags:
+    - always
+    - keepalived
+    - keepalived_validation
+
+- name: Validate each generic VRRP instance
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[A-Za-z0-9_.-]+$')
+      - item.interface is defined and item.interface | string | length > 0
+      - item.virtual_router_id | int >= 1
+      - item.virtual_router_id | int <= 255
+      - item.priority | int >= 1
+      - item.priority | int <= 254
+      - >-
+        (item.state | default('BACKUP') | string | upper) in
+        ['BACKUP', 'MASTER']
+      - >-
+        (item.mode | default('multicast') | string | lower) in
+        ['multicast', 'unicast']
+      - item.virtual_ip_addresses is defined
+      - item.virtual_ip_addresses | length > 0
+      - >-
+        (item.auth_type | default('NONE') | string | upper) in
+        ['NONE', 'PASS', 'AH']
+      - item.auth_type | default('NONE') | string | upper == 'NONE'
+        or (item.auth_pass | default('') | string | length >= 1
+            and item.auth_pass | string | length <= 8)
+      - item.advert_int | default(1) | float > 0
+      - >-
+        (item.track_scripts | default([]) | map(attribute='name') | list
+        | unique | length) == (item.track_scripts | default([]) | length)
+    fail_msg: >-
+      Keepalived instance {{ item.name | default('unknown') }} has invalid
+      interface, VRID, priority, VIP, authentication, advert interval, or
+      health-check data.
+  loop: "{{ keepalived_vrrp_instances }}"
+  loop_control:
+    label: "{{ item.name | default('unknown') }}"
+  when: keepalived_enabled | bool
+  tags:
+    - always
+    - keepalived
+    - keepalived_validation
+
+- name: Install Keepalived and declared runtime dependencies
+  ansible.builtin.package:
+    name: "{{ ([keepalived_package] + keepalived_runtime_packages) | unique }}"
+    state: present
+  when:
+    - keepalived_enabled | bool
+    - keepalived_manage_package | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_install
+
+- name: Gather Keepalived service facts
+  ansible.builtin.service_facts:
+  when:
+    - keepalived_enabled | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_validation
+
+- name: Record whether Keepalived was active before reconciliation
+  ansible.builtin.set_fact:
+    keepalived_service_was_active: >-
+      {{ ansible_facts.services.get(keepalived_service ~ '.service', {})
+         .get('state', '') == 'running' }}
+  when:
+    - keepalived_enabled | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_validation
+
+- name: Stop explicitly configured conflicting Keepalived services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop: "{{ keepalived_conflicting_services }}"
+  loop_control:
+    label: "conflicting service {{ item }}"
+  when:
+    - keepalived_enabled | bool
+    - keepalived_manage_service | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+    - item != keepalived_service
+    - ansible_facts.services.get(item ~ '.service', {}) | length > 0
+    - ansible_facts.services[item ~ '.service'].state in ['running', 'failed']
+  tags:
+    - keepalived
+    - keepalived_service
+
+- name: Detect the optional generic Keepalived firewall backend
+  ansible.builtin.command: command -v ufw
+  register: keepalived_ufw_binary
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: keepalived_firewall_enabled | bool
+  tags:
+    - keepalived
+    - keepalived_firewall
+
+- name: Read the optional generic Keepalived firewall policy
+  ansible.builtin.command: ufw status
+  register: keepalived_ufw_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - keepalived_firewall_enabled | bool
+    - keepalived_ufw_binary.rc | default(1) | int == 0
+  tags:
+    - keepalived
+    - keepalived_firewall
+
+- name: Require an inspectable firewall when enabled
+  ansible.builtin.assert:
+    that:
+      - keepalived_ufw_binary.rc | default(1) | int == 0
+      - keepalived_ufw_status.rc | default(1) | int == 0
+    fail_msg: >-
+      keepalived_firewall_enabled=true but UFW is unavailable or cannot be
+      inspected. No VRRP firewall mutation was attempted.
+  when: keepalived_firewall_enabled | bool
+  tags:
+    - keepalived
+    - keepalived_firewall
+
+- name: Derive generic unicast peer hosts
+  ansible.builtin.set_fact:
+    keepalived_peer_hosts_effective: >-
+      {{ (keepalived_peer_hosts
+          if keepalived_peer_hosts | length > 0
+          else (groups[keepalived_peer_inventory_group] | default([])
+                if keepalived_peer_inventory_group | length > 0 else []))
+         | difference([inventory_hostname]) }}
+  when: keepalived_enabled | bool
+  tags:
+    - keepalived
+    - keepalived_validation
+
+- name: Resolve generic unicast peer addresses
+  ansible.builtin.set_fact:
+    keepalived_unicast_peer_addresses_effective: >-
+      {{ (keepalived_peer_hosts_effective | default([])
+          | map('extract', hostvars)
+          | map(attribute='ansible_host', default='') | list)
+         | reject('equalto', '') | list }}
+  when: keepalived_enabled | bool
+  tags:
+    - keepalived
+    - keepalived_validation
+
+- name: Resolve the local generic unicast source address
+  ansible.builtin.set_fact:
+    keepalived_unicast_src_ip_effective: >-
+      {{ keepalived_unicast_src_ip
+         if keepalived_unicast_src_ip | length > 0
+         else ansible_host
+         | default(ansible_facts.default_ipv4.address | default('')) }}
+  when: keepalived_enabled | bool
+  tags:
+    - keepalived
+    - keepalived_validation
+
+- name: Build the effective independent VRRP instance list
+  ansible.builtin.set_fact:
+    keepalived_vrrp_instances_effective: >-
+      {{ (keepalived_vrrp_instances_effective | default([])) + [
+           item | combine({
+             'mode': item.mode | default('multicast'),
+             'state': item.state | default('BACKUP'),
+             'advert_int': item.advert_int | default(1),
+             'auth_type': item.auth_type | default('NONE'),
+             'unicast_src_ip': item.unicast_src_ip
+                 | default(keepalived_unicast_src_ip_effective),
+             'unicast_peers': item.unicast_peers
+                 | default(keepalived_unicast_peer_addresses_effective
+                          | default([])),
+             'track_scripts': item.track_scripts | default([]),
+             'notify': item.notify | default({})
+           }, recursive=true)
+         ] }}
+  loop: "{{ keepalived_vrrp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: keepalived_enabled | bool
+  tags:
+    - keepalived
+    - keepalived_validation
+
+- name: Validate unicast peers for each independent instance
+  ansible.builtin.assert:
+    that:
+      - (item.mode | lower != 'unicast')
+        or >-
+          (item.unicast_src_ip | string | length > 0
+          and item.unicast_peers | length > 0)
+      - (item.mode | lower != 'unicast')
+        or item.unicast_src_ip not in item.unicast_peers
+    fail_msg: >-
+      Unicast instance {{ item.name }} needs a local source address and at
+      least one peer that is not the local address.
+  loop: "{{ keepalived_vrrp_instances_effective | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: keepalived_enabled | bool
+  tags:
+    - keepalived
+    - keepalived_validation
+
+- name: Apply generic Keepalived VRRP firewall rules
+  ansible.builtin.command: >-
+    ufw allow
+    {% if item | length > 0 %}from {{ item }} to any proto vrrp
+    {% else %}proto vrrp{% endif %}
+  loop: >-
+    {{ keepalived_firewall_sources
+       if keepalived_firewall_sources | length > 0
+       else (keepalived_unicast_peer_addresses_effective | default([])
+             if (keepalived_vrrp_instances_effective | default([])
+                 | selectattr('mode', 'equalto', 'unicast') | list | length > 0)
+             else ['']) }}
+  loop_control:
+    label: >-
+      VRRP{% if item | length > 0 %} {{ item }}{% else %} multicast{% endif %}
+  register: keepalived_ufw_rule_result
+  changed_when: >-
+    'Rule added' in keepalived_ufw_rule_result.stdout
+    or 'Rules updated' in keepalived_ufw_rule_result.stdout
+  when:
+    - keepalived_firewall_enabled | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_firewall
+
+- name: Create the generic Keepalived script group
+  ansible.builtin.group:
+    name: "{{ keepalived_script_group }}"
+    gid: >-
+      {{ keepalived_script_gid if keepalived_script_gid | string | length > 0
+         else omit }}
+    system: true
+    state: present
+  when:
+    - keepalived_enabled | bool
+    - keepalived_script_user_manage | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_users
+
+- name: Create the generic Keepalived script user
+  ansible.builtin.user:
+    name: "{{ keepalived_script_user }}"
+    uid: >-
+      {{ keepalived_script_uid if keepalived_script_uid | string | length > 0
+         else omit }}
+    group: "{{ keepalived_script_group }}"
+    home: "{{ keepalived_script_home }}"
+    shell: "{{ keepalived_script_shell }}"
+    system: true
+    create_home: false
+    password_lock: true
+    state: present
+  when:
+    - keepalived_enabled | bool
+    - keepalived_script_user_manage | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_users
+
+- name: Create generic Keepalived directories and state log
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: "{{ item.state | default('directory') }}"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode }}"
+    access_time: >-
+      {{ 'preserve' if item.state | default('directory') == 'file' else omit }}
+    modification_time: >-
+      {{ 'preserve' if item.state | default('directory') == 'file' else omit }}
+  loop:
+    - path: "{{ keepalived_config_directory }}"
+      mode: "0750"
+      group: "{{ keepalived_script_group }}"
+    - path: "{{ keepalived_script_directory }}"
+      mode: "0755"
+    - path: "{{ keepalived_state_log_directory }}"
+      mode: "0750"
+      group: "{{ keepalived_state_log_group }}"
+    - path: "{{ keepalived_state_log }}"
+      state: file
+      mode: "{{ keepalived_state_log_mode }}"
+      owner: "{{ keepalived_state_log_owner }}"
+      group: "{{ keepalived_state_log_group }}"
+  when:
+    - keepalived_enabled | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_config
+
+- name: Install generic Keepalived logrotate policy
+  ansible.builtin.template:
+    src: keepalived.logrotate.j2
+    dest: "{{ keepalived_logrotate_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - keepalived_enabled | bool
+    - keepalived_logrotate_enabled | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_config
+
+- name: Remove generic Keepalived logrotate policy when disabled
+  ansible.builtin.file:
+    path: "{{ keepalived_logrotate_file }}"
+    state: absent
+  when:
+    - not keepalived_enabled | bool or not keepalived_logrotate_enabled | bool
+    - keepalived_mutations_allowed | default(false) | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_config
+
+- name: Install generic Keepalived systemd ordering override
+  ansible.builtin.template:
+    src: keepalived-systemd-override.conf.j2
+    dest: "{{ keepalived_systemd_override }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: keepalived daemon reload
+  when:
+    - keepalived_enabled | bool
+    - keepalived_systemd_ordering_enabled | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_config
+
+- name: Render and validate the generic Keepalived configuration
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: "{{ keepalived_config_file }}"
+    owner: root
+    group: root
+    mode: "{{ keepalived_config_mode }}"
+    validate: >-
+      {{ keepalived_validation_command
+         if keepalived_config_validation_enabled | bool else omit }}
+  notify: keepalived reload
+  no_log: true
+  when:
+    - keepalived_enabled | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_config
+    - keepalived_validation
+
+- name: Enable and start the generic Keepalived service
+  ansible.builtin.systemd:
+    name: "{{ keepalived_service }}"
+    enabled: true
+    state: started
+  when:
+    - keepalived_enabled | bool
+    - keepalived_manage_service | bool
+    - keepalived_mutations_allowed | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_service
+
+- name: Gather service facts after generic Keepalived reconciliation
+  ansible.builtin.service_facts:
+  when:
+    - keepalived_enabled | bool
+    - keepalived_manage_service | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_validation
+
+- name: Require an active generic Keepalived service
+  ansible.builtin.assert:
+    that:
+      - >-
+        ansible_facts.services[keepalived_service ~ '.service'].state
+        == 'running'
+    fail_msg: >-
+      Keepalived did not remain active after the validated configuration was
+      applied.
+  when:
+    - keepalived_enabled | bool
+    - keepalived_manage_service | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_validation
+
+- name: Check the live generic Keepalived configuration without changing state
+  ansible.builtin.command:
+    argv:
+      - "{{ keepalived_validation_binary }}"
+      - -t
+      - -f
+      - "{{ keepalived_config_file }}"
+  changed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - keepalived_enabled | bool
+    - not ansible_check_mode
+  tags:
+    - keepalived
+    - keepalived_validation

@@ -1,0 +1,24 @@
+---
+- name: Reload systemd manager for Keepalived
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: keepalived daemon reload
+
+- name: Reload Keepalived after a validated configuration change
+  ansible.builtin.systemd:
+    name: "{{ keepalived_service }}"
+    state: reloaded
+  listen: keepalived reload
+  when:
+    - keepalived_manage_service | bool
+    - keepalived_service_was_active | default(false) | bool
+    - not ansible_check_mode
+
+- name: Restart Keepalived after a validated configuration change
+  ansible.builtin.systemd:
+    name: "{{ keepalived_service }}"
+    state: restarted
+  listen: keepalived restart
+  when:
+    - keepalived_manage_service | bool
+    - not ansible_check_mode

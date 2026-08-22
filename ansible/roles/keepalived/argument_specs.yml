@@ -1,0 +1,56 @@
+---
+argument_specs:
+  main:
+    short_description: >-
+      Manage an independent, data-driven Keepalived configuration.
+    options:
+      keepalived_enabled:
+        type: bool
+        default: false
+      keepalived_package:
+        type: str
+        default: keepalived
+      keepalived_service:
+        type: str
+        default: keepalived
+      keepalived_existing_deployment_mode:
+        type: str
+        choices:
+          - auto
+          - new
+          - maintenance
+        default: auto
+      keepalived_existing_deployment_reconcile_enabled:
+        type: bool
+        default: false
+      keepalived_vrrp_instances:
+        type: list
+        elements: dict
+        default: []
+      keepalived_sync_groups:
+        type: list
+        elements: dict
+        default: []
+      keepalived_peer_inventory_group:
+        type: str
+        default: ""
+      keepalived_peer_hosts:
+        type: list
+        elements: str
+        default: []
+      keepalived_script_user:
+        type: str
+        default: keepalived-health
+      keepalived_script_group:
+        type: str
+        default: keepalived-health
+      keepalived_script_user_manage:
+        type: bool
+        default: true
+      keepalived_firewall_enabled:
+        type: bool
+        default: false
+      keepalived_firewall_sources:
+        type: list
+        elements: str
+        default: []
